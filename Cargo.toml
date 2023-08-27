@@ -1,0 +1,17 @@
+[package]
+name = "p2p-bridge-webui"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = "4"
+tokio = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lazy_static = "1"
+webrtc = "0.8"
+bytes = "1.4"
+uuid = { version = "1.4", features = ["v4"] }
+clap = { version = "4", features = ["derive"] }

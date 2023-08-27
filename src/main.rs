@@ -1,0 +1,162 @@
+#![allow(dead_code)]
+
+mod answer;
+mod connection;
+mod errors;
+mod offer;
+mod messages;
+mod args;
+
+use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+
+use actix_web::{get, post, App, HttpResponse, HttpServer};
+use args::Args;
+use clap::Parser;
+use connection::Connection;
+use lazy_static::lazy_static;
+use tokio::sync::Mutex;
+use uuid::Uuid;
+use webrtc::{
+    data_channel::RTCDataChannel,
+    ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit},
+};
+
+use errors::WrapErrors;
+
+use crate::{
+    answer::create_answer_inner,
+    connection::IcedSessionDescription,
+    offer::{accept_answer_inner, create_offer_inner}, messages::publish_message_inner,
+};
+
+lazy_static! {
+    pub static ref WEBRTC: webrtc::api::API = webrtc::api::APIBuilder::new().build();
+    pub static ref CONNECTIONS: Mutex<HashMap<Uuid, Connection>> = Mutex::new(HashMap::new());
+}
+
+async fn get_peers_inner() -> Result<Vec<String>, String> {
+    let connections = CONNECTIONS.lock().await;
+    Ok(connections
+        .iter()
+        .map(|(id, _con)| id.to_string())
+        .collect::<Vec<_>>())
+}
+
+#[get("/peers")]
+async fn get_peers() -> HttpResponse {
+    match serde_json::to_string(&get_peers_inner().await) {
+        Ok(json) => HttpResponse::Ok()
+            .content_type("application/json")
+            .body(json),
+        Err(err) => HttpResponse::InternalServerError().body(err.to_string()),
+    }
+}
+
+fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
+    let id_c = id.clone();
+    let data_channel_c = data_channel.clone();
+    data_channel.on_open(Box::new(move || {
+        Box::pin(async move {
+            CONNECTIONS
+                .lock()
+                .await
+                .insert(id, Connection::new(id_c, data_channel_c));
+        })
+    }));
+    let id_c = id.clone();
+    data_channel.on_message(Box::new(move |message| {
+        Box::pin(async move {
+            if let Some(conn) = CONNECTIONS.lock().await.get(&id_c) {
+                conn.handle_message(message);
+            }
+        })
+    }));
+    let id_c = id.clone();
+    data_channel.on_close(Box::new(move || {
+        Box::pin(async move {
+            CONNECTIONS.lock().await.remove(&id_c);
+        })
+    }));
+}
+
+type PinnedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+type IceCandidateHandler = Box<dyn FnMut(Option<RTCIceCandidate>) -> PinnedFuture + Send + Sync>;
+
+fn create_ice_candidate_handler(
+    candidates: Arc<std::sync::Mutex<Vec<RTCIceCandidateInit>>>,
+) -> IceCandidateHandler {
+    Box::new(move |candidate| {
+        let candidates = candidates.clone();
+        Box::pin(async move {
+            if let Some(Ok(candidate)) = candidate.map(|i| i.to_json()) {
+                if let Ok(mut lock) = candidates.lock() {
+                    lock.push(candidate);
+                }
+            }
+        })
+    })
+}
+
+#[get("/call/offer")]
+async fn create_offer() -> HttpResponse {
+    match create_offer_inner().await {
+        Ok(body) => match serde_json::to_string(&body).wrap_errors() {
+            Ok(body) => HttpResponse::Ok()
+                .content_type("application/json")
+                .body(body),
+            Err(body) => HttpResponse::InternalServerError().body(body),
+        },
+        Err(body) => HttpResponse::InternalServerError().body(body),
+    }
+}
+
+#[post("/call/answer")]
+async fn create_answer(offer: String) -> HttpResponse {
+    match serde_json::from_str::<IcedSessionDescription>(&offer) {
+        Ok(offer) => match create_answer_inner(offer).await {
+            Ok(body) => match serde_json::to_string(&body).wrap_errors() {
+                Ok(body) => HttpResponse::Ok()
+                    .content_type("application/json")
+                    .body(body),
+                Err(body) => HttpResponse::InternalServerError().body(body),
+            },
+            Err(body) => HttpResponse::InternalServerError().body(body),
+        },
+        Err(err) => HttpResponse::BadRequest().body(err.to_string()),
+    }
+}
+
+#[post("/call/accept")]
+async fn accept_answer(answer: String) -> HttpResponse {
+    match serde_json::from_str::<IcedSessionDescription>(&answer) {
+        Ok(answer) => match accept_answer_inner(answer).await {
+            Ok(()) => HttpResponse::Ok().finish(),
+            Err(body) => HttpResponse::InternalServerError().body(body),
+        },
+        Err(err) => HttpResponse::BadRequest().body(err.to_string()),
+    }
+}
+
+#[post("/publish-message")]
+async fn publish_message(msg: String) -> HttpResponse {
+    match publish_message_inner(msg).await {
+        Ok(()) => HttpResponse::Ok().finish(),
+        Err(body) => HttpResponse::InternalServerError().body(body),
+    }
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    let args = Args::parse();
+    HttpServer::new(|| {
+        App::new()
+            .service(get_peers)
+            .service(create_offer)
+            .service(create_answer)
+            .service(accept_answer)
+            .service(publish_message)
+    })
+    .bind(("127.0.0.1", args.get_port()))?
+    .run()
+    .await
+}
