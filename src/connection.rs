@@ -1,7 +1,9 @@
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 
 use bytes::Bytes;
+use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use webrtc::{
     data_channel::{data_channel_message::DataChannelMessage, RTCDataChannel},
@@ -9,6 +11,10 @@ use webrtc::{
 };
 
 use crate::errors::WrapErrors;
+
+lazy_static! {
+    pub static ref CONNECTIONS: Mutex<HashMap<Uuid, Connection>> = Mutex::new(HashMap::new());
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum IcedSessionDescription {
@@ -42,4 +48,11 @@ impl Connection {
     pub fn handle_message(&self, message: DataChannelMessage) {
         println!("{:?}", message);
     }
+}
+
+pub async fn publish(msg: &Bytes) -> Result<(), String> {
+    for (_, conn) in CONNECTIONS.lock().await.iter() {
+        conn.send(msg).await?;
+    }
+    Ok(())
 }

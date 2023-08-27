@@ -1,20 +1,18 @@
 #![allow(dead_code)]
 
 mod answer;
+mod args;
 mod connection;
 mod errors;
 mod offer;
-mod messages;
-mod args;
 
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use actix_web::{get, post, App, HttpResponse, HttpServer};
 use args::Args;
 use clap::Parser;
-use connection::Connection;
+use connection::{Connection, CONNECTIONS};
 use lazy_static::lazy_static;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 use webrtc::{
     data_channel::RTCDataChannel,
@@ -26,12 +24,11 @@ use errors::WrapErrors;
 use crate::{
     answer::create_answer_inner,
     connection::IcedSessionDescription,
-    offer::{accept_answer_inner, create_offer_inner}, messages::publish_message_inner,
+    offer::{accept_answer_inner, create_offer_inner},
 };
 
 lazy_static! {
     pub static ref WEBRTC: webrtc::api::API = webrtc::api::APIBuilder::new().build();
-    pub static ref CONNECTIONS: Mutex<HashMap<Uuid, Connection>> = Mutex::new(HashMap::new());
 }
 
 async fn get_peers_inner() -> Result<Vec<String>, String> {
@@ -137,14 +134,6 @@ async fn accept_answer(answer: String) -> HttpResponse {
     }
 }
 
-#[post("/publish-message")]
-async fn publish_message(msg: String) -> HttpResponse {
-    match publish_message_inner(msg).await {
-        Ok(()) => HttpResponse::Ok().finish(),
-        Err(body) => HttpResponse::InternalServerError().body(body),
-    }
-}
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
@@ -154,7 +143,6 @@ async fn main() -> std::io::Result<()> {
             .service(create_offer)
             .service(create_answer)
             .service(accept_answer)
-            .service(publish_message)
     })
     .bind(("127.0.0.1", args.get_port()))?
     .run()
