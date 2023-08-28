@@ -88,12 +88,16 @@ impl Connection {
         if message.is_string {
             match String::from_utf8(message.data.to_vec()) {
                 Ok(message) if message.starts_with("IP fc") => match message[3..].parse() {
-                    Ok(ip) => self.ip = Some(ip),
+                    Ok(ip) => {
+                        println!("Made connection with {}", ip);
+                        self.ip = Some(ip)
+                    }
                     _ => {}
                 },
                 _ => {}
             }
         } else {
+            println!("Receiving {} bytes", message.data.len());
             if let Err(err) = IFACE.send(&message.data) {
                 eprintln!("TUN error {}", err.to_string());
             }
@@ -116,6 +120,7 @@ pub fn listen_tun() -> () {
             match IFACE.recv(&mut buf) {
                 Ok(size) => {
                     let buf = buf[..size].to_vec();
+                    println!("Publishing {} bytes", buf.len());
                     if let Err(err) = publish(&Bytes::copy_from_slice(&buf)).await {
                         eprintln!("TUN error {}", err.to_string());
                     }
