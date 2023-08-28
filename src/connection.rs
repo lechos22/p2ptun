@@ -81,7 +81,8 @@ impl Connection {
         Ok(())
     }
     pub async fn send(&self, message: &Bytes) -> Result<(), String> {
-        self.data_channel.send(message).await.wrap_errors()?;
+        let size = self.data_channel.send(message).await.wrap_errors()?;
+        println!("Publishing {} bytes", size);
         Ok(())
     }
     pub fn handle_message(&mut self, message: DataChannelMessage) {
@@ -97,9 +98,9 @@ impl Connection {
                 _ => {}
             }
         } else {
-            println!("Receiving {} bytes", message.data.len());
-            if let Err(err) = IFACE.send(&message.data) {
-                eprintln!("TUN error {}", err.to_string());
+            match IFACE.send(&message.data) {
+                Ok(size) => println!("Receiving {} bytes", size),
+                Err(err) => eprintln!("TUN error {}", err.to_string()),
             }
         }
     }
@@ -119,7 +120,6 @@ pub fn listen_tun() -> () {
             match IFACE.recv(&mut buf) {
                 Ok(size) => {
                     let buf = buf[..size].to_vec();
-                    println!("Publishing {} bytes", buf.len());
                     if let Err(err) = publish(&Bytes::copy_from_slice(&buf)).await {
                         eprintln!("TUN error {}", err.to_string());
                     }
