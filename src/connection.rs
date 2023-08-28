@@ -102,7 +102,6 @@ impl Connection {
                 eprintln!("TUN error {}", err.to_string());
             }
         }
-        println!("{:?}", message);
     }
 }
 
