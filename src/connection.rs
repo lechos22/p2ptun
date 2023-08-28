@@ -94,8 +94,9 @@ impl Connection {
                 _ => {}
             }
         } else {
-            let result = IFACE.send(&message.data);
-            println!("{:?}", result);
+            if let Err(err) = IFACE.send(&message.data) {
+                eprintln!("TUN error {}", err.to_string());
+            }
         }
         println!("{:?}", message);
     }
@@ -116,12 +117,12 @@ pub fn listen_tun() -> () {
                 Ok(size) => {
                     let buf = buf[..size].to_vec();
                     if let Err(err) = publish(&Bytes::copy_from_slice(&buf)).await {
-                        println!("TUN error {}", err.to_string());
+                        eprintln!("TUN error {}", err.to_string());
                     }
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(err) => {
-                    println!("TUN error {}", err.to_string());
+                    eprintln!("TUN error {}", err.to_string());
                 }
             }
             tokio::time::sleep(Duration::from_millis(1)).await;
