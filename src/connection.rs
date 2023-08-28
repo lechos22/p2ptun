@@ -82,7 +82,7 @@ impl Connection {
     }
     pub async fn send(&self, message: &Bytes) -> Result<(), String> {
         let size = self.data_channel.send(message).await.wrap_errors()?;
-        println!("Publishing {} bytes", size);
+        println!("Sending {} bytes to {}, IP: {:?}", size, self.id, self.ip);
         Ok(())
     }
     pub fn handle_message(&mut self, message: DataChannelMessage) {
@@ -99,7 +99,7 @@ impl Connection {
             }
         } else {
             match IFACE.send(&message.data) {
-                Ok(size) => println!("Receiving {} bytes", size),
+                Ok(size) => println!("Receiving {} bytes from {}, IP: {:?}", size, self.id, self.ip),
                 Err(err) => eprintln!("TUN error {}", err.to_string()),
             }
         }
