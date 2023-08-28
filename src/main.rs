@@ -59,6 +59,7 @@ fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
     let data_channel_c = data_channel.clone();
     data_channel.on_open(Box::new(move || {
         Box::pin(async move {
+            println!("Opened connection {}", id);
             CONNECTIONS
                 .lock()
                 .await
@@ -76,6 +77,7 @@ fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
     let id_c = id.clone();
     data_channel.on_close(Box::new(move || {
         Box::pin(async move {
+            println!("Closed connection {}", id);
             CONNECTIONS.lock().await.remove(&id_c);
         })
     }));

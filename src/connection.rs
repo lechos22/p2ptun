@@ -90,7 +90,7 @@ impl Connection {
             match String::from_utf8(message.data.to_vec()) {
                 Ok(message) if message.starts_with("IP fc") => match message[3..].parse() {
                     Ok(ip) => {
-                        println!("Made connection with {}", ip);
+                        println!("Received IP {} from connection {}", ip, self.id);
                         self.ip = Some(ip)
                     }
                     _ => {}
