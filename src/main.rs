@@ -6,7 +6,7 @@ mod connection;
 mod errors;
 mod offer;
 
-use std::{future::Future, pin::Pin, sync::Arc, net::Ipv6Addr};
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use actix_web::{get, post, App, HttpResponse, HttpServer};
 use args::Args;
@@ -24,7 +24,7 @@ use errors::WrapErrors;
 
 use crate::{
     answer::create_answer_inner,
-    connection::{IcedSessionDescription, IPV6_ADDRESS},
+    connection::IcedSessionDescription,
     offer::{accept_answer_inner, create_offer_inner},
 };
 
@@ -32,11 +32,11 @@ lazy_static! {
     pub static ref WEBRTC: webrtc::api::API = webrtc::api::APIBuilder::new().build();
 }
 
-async fn get_peers_inner() -> Result<Vec<(String, Option<Ipv6Addr>)>, String> {
+async fn get_peers_inner() -> Result<Vec<String>, String> {
     let connections = CONNECTIONS.lock().await;
     let mut peers = Vec::with_capacity(connections.len());
-    for (id, con) in connections.iter() {
-        peers.push((id.to_string(), con.lock().await.get_ip()));
+    for (id, _con) in connections.iter() {
+        peers.push(id.to_string());
     }
     Ok(peers)
 }
@@ -141,11 +141,6 @@ async fn accept_answer(answer: String) -> HttpResponse {
     }
 }
 
-#[get("/ip/v6")]
-async fn get_ip() -> HttpResponse {
-    HttpResponse::Ok().body(IPV6_ADDRESS.to_string())
-}
-
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
@@ -156,7 +151,6 @@ async fn main() -> std::io::Result<()> {
             .service(create_offer)
             .service(create_answer)
             .service(accept_answer)
-            .service(get_ip)
     })
     .bind(("127.0.0.1", args.get_port()))?
     .run()
