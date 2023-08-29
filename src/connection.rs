@@ -1,17 +1,16 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
-use tun_tap::Iface;
 use uuid::Uuid;
 use webrtc::{
     data_channel::{data_channel_message::DataChannelMessage, RTCDataChannel},
     ice_transport::ice_candidate::RTCIceCandidateInit,
 };
 
-use crate::errors::WrapErrors;
+use crate::{errors::WrapErrors, tun::Tun};
 
 const fn nth_group(x: u128, n: u8) -> u16 {
     ((x & (0xffff << (n * 16))) >> (n * 16)) as u16
@@ -20,11 +19,7 @@ const fn nth_group(x: u128, n: u8) -> u16 {
 lazy_static! {
     pub static ref CONNECTIONS: Mutex<HashMap<Uuid, Mutex<Connection>>> =
         Mutex::new(HashMap::new());
-    pub static ref IFACE: Iface = {
-        let iface = Iface::new("p2ptun", tun_tap::Mode::Tun).unwrap();
-        iface.set_non_blocking().unwrap();
-        iface
-    };
+    pub static ref TUN: Tun = Tun::new("p2ptun").unwrap();
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -67,7 +62,7 @@ impl Connection {
                 _ => {}
             }
         } else {
-            match IFACE.send(&message.data) {
+            match TUN.send(&message.data) {
                 Ok(size) => println!("Receiving {} bytes from {}", size, self.id),
                 Err(err) => eprintln!("TUN error {}", err.to_string()),
             }
@@ -80,25 +75,4 @@ pub async fn publish(msg: &Bytes) -> Result<(), String> {
         conn.lock().await.send(msg).await?;
     }
     Ok(())
-}
-
-pub fn listen_tun() -> () {
-    tokio::spawn(async {
-        let mut buf: [u8; 1542] = [0; 1542];
-        loop {
-            match IFACE.recv(&mut buf) {
-                Ok(size) => {
-                    let buf = buf[..size].to_vec();
-                    if let Err(err) = publish(&Bytes::copy_from_slice(&buf)).await {
-                        eprintln!("TUN error {}", err.to_string());
-                    }
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(err) => {
-                    eprintln!("TUN error {}", err.to_string());
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        }
-    });
 }

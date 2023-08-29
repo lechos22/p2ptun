@@ -5,13 +5,14 @@ mod args;
 mod connection;
 mod errors;
 mod offer;
+mod tun;
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use actix_web::{get, post, App, HttpResponse, HttpServer};
 use args::Args;
 use clap::Parser;
-use connection::{Connection, CONNECTIONS};
+use connection::{Connection, CONNECTIONS, TUN};
 use lazy_static::lazy_static;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -144,7 +145,7 @@ async fn accept_answer(answer: String) -> HttpResponse {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
-    connection::listen_tun();
+    TUN.listen();
     HttpServer::new(|| {
         App::new()
             .service(get_peers)
