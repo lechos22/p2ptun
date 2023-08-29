@@ -1826,7 +1826,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "p2p-bridge-webui"
+name = "p2ptun"
 version = "0.1.0"
 dependencies = [
  "actix-web",
