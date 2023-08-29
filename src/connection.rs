@@ -23,7 +23,6 @@ lazy_static! {
     pub static ref IFACE: Iface = {
         let iface = Iface::new("p2ptun", tun_tap::Mode::Tun).unwrap();
         iface.set_non_blocking().unwrap();
-        //iface.send(&[]).unwrap();
         iface
     };
 }
