@@ -1,4 +1,4 @@
 # TODO
 
-- [ ] Conf file with ip
-- [ ] Logging
+- Conf file with ip
+- Web UI
