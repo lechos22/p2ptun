@@ -12,7 +12,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 use actix_web::{get, post, App, HttpResponse, HttpServer};
 use args::Args;
 use clap::Parser;
-use connection::{Connection, CONNECTIONS, TUN};
+use connection::{publish, Connection, CONNECTIONS, TUN};
 use lazy_static::lazy_static;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -145,7 +145,13 @@ async fn accept_answer(answer: String) -> HttpResponse {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
-    TUN.listen();
+    TUN.listen(Box::new(|buf| {
+        Box::pin(async move {
+            if let Err(err) = publish(buf).await {
+                eprintln!("TUN error {}", err.to_string());
+            }
+        })
+    }));
     HttpServer::new(|| {
         App::new()
             .service(get_peers)

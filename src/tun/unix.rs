@@ -1,10 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
-use bytes::Bytes;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tun_tap::Iface;
 
-use crate::{connection::publish, errors::WrapErrors};
+use crate::errors::WrapErrors;
 
 pub struct Tun {
     iface: Arc<Iface>,
@@ -23,7 +22,12 @@ impl Tun {
     pub fn send(&self, packet: &[u8]) -> Result<usize, String> {
         self.iface.send(packet).wrap_errors()
     }
-    pub fn listen(&self) -> () {
+    pub fn listen(
+        &self,
+        on_message: Box<
+            dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Sync + Send>> + Sync + Send,
+        >,
+    ) -> () {
         self.unlisten();
         let iface = self.iface.clone();
         *self.listener.blocking_lock() = Some(tokio::spawn(async move {
@@ -31,10 +35,7 @@ impl Tun {
             loop {
                 match iface.recv(&mut buf) {
                     Ok(size) => {
-                        let buf = buf[..size].to_vec();
-                        if let Err(err) = publish(&Bytes::copy_from_slice(&buf)).await {
-                            eprintln!("TUN error {}", err.to_string());
-                        }
+                        on_message(buf[..size].to_vec()).await;
                     }
                     Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(err) => {

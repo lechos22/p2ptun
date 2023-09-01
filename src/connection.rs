@@ -70,9 +70,9 @@ impl Connection {
     }
 }
 
-pub async fn publish(msg: &Bytes) -> Result<(), String> {
+pub async fn publish(msg: Vec<u8>) -> Result<(), String> {
     for (_, conn) in CONNECTIONS.lock().await.iter() {
-        conn.lock().await.send(msg).await?;
+        conn.lock().await.send(&Bytes::copy_from_slice(&msg)).await?;
     }
     Ok(())
 }
