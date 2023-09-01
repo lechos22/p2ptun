@@ -40,7 +40,7 @@ pub async fn create_offer_inner() -> Result<IcedSessionDescription, String> {
         )
         .await
         .wrap_errors()?;
-    apply_data_channel_handlers(Uuid::new_v4(), data_channel.clone());
+    apply_data_channel_handlers(Uuid::new_v4(), data_channel);
     let offer = pc
         .create_offer(Some(RTCOfferOptions::default()))
         .await

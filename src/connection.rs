@@ -19,7 +19,7 @@ const fn nth_group(x: u128, n: u8) -> u16 {
 lazy_static! {
     pub static ref CONNECTIONS: Mutex<HashMap<Uuid, Mutex<Connection>>> =
         Mutex::new(HashMap::new());
-    pub static ref TUN: Tun = Tun::new("p2ptun").unwrap();
+    pub static ref TUN: Tun = Tun::new("p2ptun%d").unwrap();
 }
 
 #[derive(Serialize, Deserialize, Clone)]

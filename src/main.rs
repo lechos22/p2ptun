@@ -7,9 +7,9 @@ mod errors;
 mod offer;
 mod tun;
 
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{fmt::Display, future::Future, pin::Pin, sync::Arc};
 
-use actix_web::{get, post, App, HttpResponse, HttpServer};
+use actix_web::{dev::Service, get, middleware::Logger, post, App, HttpResponse, HttpServer};
 use args::Args;
 use clap::Parser;
 use connection::{publish, Connection, CONNECTIONS, TUN};
@@ -56,30 +56,36 @@ async fn get_peers() -> HttpResponse {
 }
 
 fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
-    let id_c = id;
-    let data_channel_c = data_channel.clone();
+    let id = id;
+    let data_channel_weak = Arc::downgrade(&data_channel);
     data_channel.on_open(Box::new(move || {
         Box::pin(async move {
-            println!("Opened connection {}", id);
-            CONNECTIONS
-                .lock()
-                .await
-                .insert(id, Mutex::new(Connection::new(id_c, data_channel_c)));
+            if let Some(data_channel) = data_channel_weak.upgrade() {
+                println!("Opened connection {}", id);
+                CONNECTIONS
+                    .lock()
+                    .await
+                    .insert(id, Mutex::new(Connection::new(id, data_channel)));
+            }
         })
     }));
-    let id_c = id;
     data_channel.on_message(Box::new(move |message| {
         Box::pin(async move {
-            if let Some(conn) = CONNECTIONS.lock().await.get(&id_c) {
+            if let Some(conn) = CONNECTIONS.lock().await.get(&id) {
                 conn.lock().await.handle_message(message);
             }
         })
     }));
-    let id_c = id;
+    data_channel.on_error(Box::new(move |err| {
+        Box::pin(async move {
+            println!("Closed connection {} due to error {}", id, err);
+            CONNECTIONS.lock().await.remove(&id);
+        })
+    }));
     data_channel.on_close(Box::new(move || {
         Box::pin(async move {
             println!("Closed connection {}", id);
-            CONNECTIONS.lock().await.remove(&id_c);
+            CONNECTIONS.lock().await.remove(&id);
         })
     }));
 }
@@ -141,6 +147,15 @@ async fn accept_answer(answer: String) -> HttpResponse {
     }
 }
 
+#[derive(Debug, Default)]
+struct BadRequestSourceError {}
+impl actix_web::ResponseError for BadRequestSourceError {}
+impl Display for BadRequestSourceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Bad request source")
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
@@ -150,9 +165,23 @@ async fn main() -> std::io::Result<()> {
                 eprintln!("TUN error {}", err);
             }
         })
-    }));
+    }))
+    .await;
     HttpServer::new(|| {
         App::new()
+            .wrap(Logger::new(
+                r#"%a "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#,
+            ))
+            .wrap_fn(|req, srv| {
+                let addr = req.peer_addr();
+                let fut = srv.call(req);
+                async move {
+                    match addr {
+                        Some(addr) if addr.ip().is_loopback() => Ok(fut.await?),
+                        _ => Err(actix_web::Error::from(BadRequestSourceError::default())),
+                    }
+                }
+            })
             .service(get_peers)
             .service(create_offer)
             .service(create_answer)

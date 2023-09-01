@@ -25,10 +25,10 @@ impl Tun {
     pub fn send(&self, packet: &[u8]) -> Result<usize, String> {
         self.iface.send(packet).wrap_errors()
     }
-    pub fn listen(&self, on_message: OnMessageFunction) {
-        self.unlisten();
+    pub async fn listen(&self, on_message: OnMessageFunction) {
+        self.unlisten().await;
         let iface = self.iface.clone();
-        *self.listener.blocking_lock() = Some(tokio::spawn(async move {
+        *self.listener.lock().await = Some(tokio::spawn(async move {
             let mut buf: [u8; 1542] = [0; 1542];
             loop {
                 match iface.recv(&mut buf) {
@@ -44,8 +44,8 @@ impl Tun {
             }
         }));
     }
-    pub fn unlisten(&self) {
-        let listener = self.listener.blocking_lock().take();
+    pub async fn unlisten(&self) {
+        let listener = self.listener.lock().await.take();
         if let Some(listener) = listener {
             listener.abort();
         }
