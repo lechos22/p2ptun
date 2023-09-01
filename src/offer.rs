@@ -1,9 +1,7 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use lazy_static::lazy_static;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use webrtc::{
     data_channel::data_channel_init::RTCDataChannelInit,
@@ -22,7 +20,7 @@ use crate::{
 };
 
 lazy_static! {
-    static ref WAITING_CONNECTION: Mutex<Option<Arc<Mutex<RTCPeerConnection>>>> = Mutex::new(None);
+    static ref WAITING_CONNECTION: Mutex<Option<RTCPeerConnection>> = Mutex::new(None);
 }
 
 pub async fn create_offer_inner() -> Result<IcedSessionDescription, String> {
@@ -52,14 +50,12 @@ pub async fn create_offer_inner() -> Result<IcedSessionDescription, String> {
     while pc.ice_gathering_state() == RTCIceGatheringState::Gathering {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let candidates = candidates.lock().wrap_errors()?.clone();
+    let candidates = candidates.lock().await.clone();
     let iced_offer = IcedSessionDescription::Offer {
         sdp: offer_sdp,
         ice_candidates: candidates,
     };
-    if let Ok(mut lock) = WAITING_CONNECTION.lock() {
-        *lock = Some(Arc::new(Mutex::new(pc)));
-    }
+    *WAITING_CONNECTION.lock().await = Some(pc);
     Ok(iced_offer)
 }
 
@@ -71,20 +67,13 @@ pub async fn accept_answer_inner(answer: IcedSessionDescription) -> Result<(), S
     else {
         return Err("Answer isn't an answer".to_string());
     };
-    if let Ok(mut lock) = WAITING_CONNECTION.lock() {
-        if let Some(value) = lock.clone() {
-            if let Ok(lock) = value.lock() {
-                lock.set_remote_description(
-                    RTCSessionDescription::answer(answer_sdp).wrap_errors()?,
-                )
-                .await
-                .wrap_errors()?;
-                for candidate in remote_candidates {
-                    lock.add_ice_candidate(candidate).await.wrap_errors()?;
-                }
-            }
+    if let Some(pc) = WAITING_CONNECTION.lock().await.take() {
+        pc.set_remote_description(RTCSessionDescription::answer(answer_sdp).wrap_errors()?)
+            .await
+            .wrap_errors()?;
+        for candidate in remote_candidates {
+            pc.add_ice_candidate(candidate).await.wrap_errors()?;
         }
-        *lock = None;
     }
     Ok(())
 }

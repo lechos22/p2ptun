@@ -56,7 +56,7 @@ async fn get_peers() -> HttpResponse {
 }
 
 fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
-    let id_c = id.clone();
+    let id_c = id;
     let data_channel_c = data_channel.clone();
     data_channel.on_open(Box::new(move || {
         Box::pin(async move {
@@ -67,7 +67,7 @@ fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
                 .insert(id, Mutex::new(Connection::new(id_c, data_channel_c)));
         })
     }));
-    let id_c = id.clone();
+    let id_c = id;
     data_channel.on_message(Box::new(move |message| {
         Box::pin(async move {
             if let Some(conn) = CONNECTIONS.lock().await.get(&id_c) {
@@ -75,7 +75,7 @@ fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
             }
         })
     }));
-    let id_c = id.clone();
+    let id_c = id;
     data_channel.on_close(Box::new(move || {
         Box::pin(async move {
             println!("Closed connection {}", id);
@@ -88,15 +88,14 @@ type PinnedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type IceCandidateHandler = Box<dyn FnMut(Option<RTCIceCandidate>) -> PinnedFuture + Send + Sync>;
 
 fn create_ice_candidate_handler(
-    candidates: Arc<std::sync::Mutex<Vec<RTCIceCandidateInit>>>,
+    candidates: Arc<Mutex<Vec<RTCIceCandidateInit>>>,
 ) -> IceCandidateHandler {
     Box::new(move |candidate| {
         let candidates = candidates.clone();
         Box::pin(async move {
             if let Some(Ok(candidate)) = candidate.map(|i| i.to_json()) {
-                if let Ok(mut lock) = candidates.lock() {
-                    lock.push(candidate);
-                }
+                let mut lock = candidates.lock().await;
+                lock.push(candidate);
             }
         })
     })
@@ -148,7 +147,7 @@ async fn main() -> std::io::Result<()> {
     TUN.listen(Box::new(|buf| {
         Box::pin(async move {
             if let Err(err) = publish(buf).await {
-                eprintln!("TUN error {}", err.to_string());
+                eprintln!("TUN error {}", err);
             }
         })
     }));

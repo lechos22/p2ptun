@@ -1,8 +1,6 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
+use tokio::sync::Mutex;
 use uuid::Uuid;
 use webrtc::{
     data_channel::data_channel_init::RTCDataChannelInit,
@@ -62,10 +60,9 @@ pub async fn create_answer_inner(
     while pc.ice_gathering_state() == RTCIceGatheringState::Gathering {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let candidates = candidates.lock().wrap_errors()?.clone();
     let iced_offer = IcedSessionDescription::Answer {
         sdp: answer_sdp,
-        ice_candidates: candidates,
+        ice_candidates: candidates.lock().await.clone(),
     };
     Ok(iced_offer)
 }

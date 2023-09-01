@@ -58,13 +58,11 @@ impl Connection {
     }
     pub fn handle_message(&mut self, message: DataChannelMessage) {
         if message.is_string {
-            match String::from_utf8(message.data.to_vec()) {
-                _ => {}
-            }
+            let _ = String::from_utf8(message.data.to_vec());
         } else {
             match TUN.send(&message.data) {
                 Ok(size) => println!("Receiving {} bytes from {}", size, self.id),
-                Err(err) => eprintln!("TUN error {}", err.to_string()),
+                Err(err) => eprintln!("TUN error {}", err),
             }
         }
     }

@@ -10,6 +10,9 @@ pub struct Tun {
     listener: Mutex<Option<JoinHandle<()>>>,
 }
 
+type PinnedThreadSafeFuture<T> = Pin<Box<dyn Future<Output = T> + Sync + Send>>;
+type OnMessageFunction = Box<dyn Fn(Vec<u8>) -> PinnedThreadSafeFuture<()> + Sync + Send>;
+
 impl Tun {
     pub fn new(ifname: &str) -> Result<Self, String> {
         let iface = Iface::new(ifname, tun_tap::Mode::Tun).wrap_errors()?;
@@ -22,12 +25,7 @@ impl Tun {
     pub fn send(&self, packet: &[u8]) -> Result<usize, String> {
         self.iface.send(packet).wrap_errors()
     }
-    pub fn listen(
-        &self,
-        on_message: Box<
-            dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Sync + Send>> + Sync + Send,
-        >,
-    ) -> () {
+    pub fn listen(&self, on_message: OnMessageFunction) {
         self.unlisten();
         let iface = self.iface.clone();
         *self.listener.blocking_lock() = Some(tokio::spawn(async move {
@@ -39,14 +37,14 @@ impl Tun {
                     }
                     Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(err) => {
-                        eprintln!("TUN error {}", err.to_string());
+                        eprintln!("TUN error {}", err);
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(1)).await;
             }
         }));
     }
-    pub fn unlisten(&self) -> () {
+    pub fn unlisten(&self) {
         let listener = self.listener.blocking_lock().take();
         if let Some(listener) = listener {
             listener.abort();
