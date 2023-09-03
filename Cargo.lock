@@ -1896,13 +1896,15 @@ dependencies = [
  "bytes 1.4.0",
  "clap",
  "env_logger",
+ "futures 0.3.28",
  "lazy_static",
  "log",
+ "pub-sub",
  "serde",
  "serde_json",
  "tokio 1.32.0",
  "tun-tap",
- "uuid",
+ "uuid 1.4.1",
  "webrtc",
 ]
 
@@ -2055,6 +2057,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18fb31db3f9bddb2ea821cde30a9f70117e3f119938b5ee630b7403aa6e2ead9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pub-sub"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0fb2d6fe8cd1b1aacecb5ac1cfecdc38fdb834425626668b2de2bbd775d79dc0"
+dependencies = [
+ "uuid 0.8.2",
 ]
 
 [[package]]
@@ -3011,6 +3022,15 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
+version = "0.8.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
+dependencies = [
+ "getrandom 0.2.10",
+]
+
+[[package]]
+name = "uuid"
 version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79daa5ed5740825c40b389c5e50312b9c86df53fccd33f281df655642b43869d"
@@ -3235,7 +3255,7 @@ dependencies = [
  "tokio 1.32.0",
  "turn",
  "url",
- "uuid",
+ "uuid 1.4.1",
  "waitgroup",
  "webrtc-mdns",
  "webrtc-util",

@@ -24,7 +24,7 @@
       </fieldset>
       <fieldset>
         <h2>Peers</h2>
-        <ul id="peers"></ul>
+        <output id="peers"></output>
       </fieldset>
     </form>
     <script>
@@ -59,20 +59,16 @@
         });
         if (accept.status === 200) {
           answerIn.value = "";
-          offerOut.innerText = "...";
         }
       });
-      setInterval(async () => {
+      const eventSource = new EventSource("/subscribe");
+      eventSource.addEventListener("peers:new", async () => {
+        offerOut.innerText = "...";
+        answerOut.innerText = "...";
         const peers = await fetch("/peers");
-        if (peers.status === 200) {
-          const peersJson = await peers.json();
-          peersView.replaceChildren(peersJson.map(peer => {
-            const el = document.createElement("li");
-            el.innerText = JSON.stringify(peer);
-            return el;
-          }));
-        }
-      }, 300);
+        const json = await peers.json();
+        peersView.innerText = JSON.stringify(json);
+      });
     </script>
   </body>
 </html>

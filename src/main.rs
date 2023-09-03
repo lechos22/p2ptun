@@ -7,6 +7,7 @@ mod errors;
 mod offer;
 mod tun;
 mod webui;
+mod events;
 
 use std::{fmt::Display, future::Future, pin::Pin, sync::Arc};
 
@@ -34,7 +35,7 @@ use webui::WebUI;
 use crate::{
     answer::create_answer_inner,
     connection::IcedSessionDescription,
-    offer::{accept_answer_inner, create_offer_inner},
+    offer::{accept_answer_inner, create_offer_inner}, events::{subscribe, SSE_CHANNEL, Sse},
 };
 
 lazy_static! {
@@ -69,7 +70,8 @@ fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
     data_channel.on_open(Box::new(move || {
         Box::pin(async move {
             if let Some(data_channel) = data_channel_weak.upgrade() {
-                println!("Opened connection {}", id);
+                info!("Opened connection {}", id);
+                let _ = SSE_CHANNEL.send(Sse::new("peers:new".to_string(), None));
                 CONNECTIONS
                     .lock()
                     .await
@@ -201,6 +203,7 @@ async fn main() -> std::io::Result<()> {
             .service(create_offer)
             .service(create_answer)
             .service(accept_answer)
+            .service(subscribe)
             .webui()
     })
     .bind(("localhost", port))?
