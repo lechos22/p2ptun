@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use bytes::Bytes;
 use lazy_static::lazy_static;
+use log::{info, error};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -53,7 +54,7 @@ impl Connection {
     }
     pub async fn send(&self, message: &Bytes) -> Result<(), String> {
         let size = self.data_channel.send(message).await.wrap_errors()?;
-        println!("Sending {} bytes to {}", size, self.id);
+        info!("Sending {} bytes to {}", size, self.id);
         Ok(())
     }
     pub fn handle_message(&mut self, message: DataChannelMessage) {
@@ -61,8 +62,8 @@ impl Connection {
             let _ = String::from_utf8(message.data.to_vec());
         } else {
             match TUN.send(&message.data) {
-                Ok(size) => println!("Receiving {} bytes from {}", size, self.id),
-                Err(err) => eprintln!("TUN error {}", err),
+                Ok(size) => info!("Receiving {} bytes from {}", size, self.id),
+                Err(err) => error!("TUN error {}", err),
             }
         }
     }

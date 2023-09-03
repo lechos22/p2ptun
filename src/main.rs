@@ -6,14 +6,21 @@ mod connection;
 mod errors;
 mod offer;
 mod tun;
+mod webui;
 
 use std::{fmt::Display, future::Future, pin::Pin, sync::Arc};
 
-use actix_web::{dev::Service, get, middleware::Logger, post, App, HttpResponse, HttpServer};
+use actix_web::{
+    dev::Service,
+    get,
+    middleware::{Logger, NormalizePath},
+    post, App, HttpResponse, HttpServer,
+};
 use args::Args;
 use clap::Parser;
 use connection::{publish, Connection, CONNECTIONS, TUN};
 use lazy_static::lazy_static;
+use log::info;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use webrtc::{
@@ -22,6 +29,7 @@ use webrtc::{
 };
 
 use errors::WrapErrors;
+use webui::WebUI;
 
 use crate::{
     answer::create_answer_inner,
@@ -78,13 +86,13 @@ fn apply_data_channel_handlers(id: Uuid, data_channel: Arc<RTCDataChannel>) {
     }));
     data_channel.on_error(Box::new(move |err| {
         Box::pin(async move {
-            println!("Closed connection {} due to error {}", id, err);
+            info!("Closed connection {} due to error {}", id, err);
             CONNECTIONS.lock().await.remove(&id);
         })
     }));
     data_channel.on_close(Box::new(move || {
         Box::pin(async move {
-            println!("Closed connection {}", id);
+            info!("Closed connection {}", id);
             CONNECTIONS.lock().await.remove(&id);
         })
     }));
@@ -159,6 +167,7 @@ impl Display for BadRequestSourceError {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     TUN.listen(Box::new(|buf| {
         Box::pin(async move {
             if let Err(err) = publish(buf).await {
@@ -167,8 +176,14 @@ async fn main() -> std::io::Result<()> {
         })
     }))
     .await;
+    let port = args.get_port();
+    info!("RPC API listening on http://localhost:{}", port);
+    info!("Web UI available on http://localhost:{}/webui", port);
     HttpServer::new(|| {
         App::new()
+            .wrap(NormalizePath::new(
+                actix_web::middleware::TrailingSlash::Trim,
+            ))
             .wrap(Logger::new(
                 r#"%a "%r" %s %b "%{Referer}i" "%{User-Agent}i" %T"#,
             ))
@@ -186,8 +201,10 @@ async fn main() -> std::io::Result<()> {
             .service(create_offer)
             .service(create_answer)
             .service(accept_answer)
+            .webui()
     })
-    .bind(("127.0.0.1", args.get_port()))?
+    .bind(("localhost", port))?
     .run()
-    .await
+    .await?;
+    Ok(())
 }
