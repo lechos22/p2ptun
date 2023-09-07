@@ -11,7 +11,7 @@ tokio = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 futures = "0.3"
-lazy_static = "1"
+once_cell = "*"
 webrtc = "0.8"
 bytes = "1"
 pub-sub = "2"
@@ -20,3 +20,5 @@ clap = { version = "4", features = ["derive"] }
 env_logger = "0.10"
 log = "0.4"
 tun-tap = "0.1.4"
+anyhow = "1"
+iroh-net = { version = "0.6.0-alpha.1", default-features = false }
