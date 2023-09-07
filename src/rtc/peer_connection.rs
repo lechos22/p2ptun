@@ -8,3 +8,13 @@ pub async fn create_peer_connection() -> anyhow::Result<RTCPeerConnection> {
         .await?;
     Ok(pc)
 }
+
+#[cfg(test)]
+mod test {
+    use crate::rtc::peer_connection::create_peer_connection;
+
+    #[tokio::test]
+    async fn test_creation() {
+        create_peer_connection().await.unwrap();
+    }
+}
