@@ -1,55 +1,68 @@
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
+use futures::{future::BoxFuture, FutureExt};
 use log::error;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tun_tap::Iface;
 
-pub struct Tun {
+use super::Tun;
+
+#[derive(Debug, Clone)]
+pub struct UnixTun {
     iface: Arc<Iface>,
-    listener: Mutex<Option<JoinHandle<()>>>,
+    listener: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 type PinnedThreadSafeFuture<T> = Pin<Box<dyn Future<Output = T> + Sync + Send>>;
 type OnMessageFunction = Box<dyn Fn(Vec<u8>) -> PinnedThreadSafeFuture<()> + Sync + Send>;
 
-impl Tun {
+impl UnixTun {
     pub fn new(ifname: &str) -> anyhow::Result<Self> {
         let iface = Iface::new(ifname, tun_tap::Mode::Tun)?;
         iface.set_non_blocking()?;
-        Ok(Tun {
+        Ok(UnixTun {
             iface: Arc::new(iface),
-            listener: Mutex::new(None),
+            listener: Arc::default(),
         })
     }
-    pub fn get_name(&self) -> &str {
+}
+
+impl Tun for UnixTun {
+    fn get_name(&self) -> &str {
         self.iface.name()
     }
-    pub fn send(&self, packet: &[u8]) -> anyhow::Result<usize> {
+    fn send(&self, packet: &[u8]) -> anyhow::Result<usize> {
         Ok(self.iface.send(packet)?)
     }
-    pub async fn listen(&self, on_message: OnMessageFunction) {
-        self.unlisten().await;
-        let iface = self.iface.clone();
-        *self.listener.lock().await = Some(tokio::spawn(async move {
-            let mut buf: [u8; 1542] = [0; 1542];
-            loop {
-                match iface.recv(&mut buf) {
-                    Ok(size) => {
-                        on_message(buf[..size].to_vec()).await;
+    fn listen(&self, on_message: OnMessageFunction) -> BoxFuture<'static, ()> {
+        let self_clone = self.clone();
+        async move {
+            self_clone.unlisten().await;
+            let iface = self_clone.iface.clone();
+            *self_clone.listener.lock().await = Some(tokio::spawn(async move {
+                let mut buf: [u8; 1542] = [0; 1542];
+                loop {
+                    match iface.recv(&mut buf) {
+                        Ok(size) => {
+                            on_message(buf[..size].to_vec()).await;
+                        }
+                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(err) => {
+                            error!("TUN error {}", err);
+                        }
                     }
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
-                    Err(err) => {
-                        error!("TUN error {}", err);
-                    }
+                    tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        }));
+            }));
+        }.boxed()
     }
-    pub async fn unlisten(&self) {
-        let listener = self.listener.lock().await.take();
-        if let Some(listener) = listener {
-            listener.abort();
-        }
+    fn unlisten(&self) -> BoxFuture<'static, ()> {
+        let self_clone = self.clone();
+        async move {
+            let listener = self_clone.listener.lock().await.take();
+            if let Some(listener) = listener {
+                listener.abort();
+            }
+        }.boxed()
     }
 }
