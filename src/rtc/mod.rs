@@ -20,6 +20,12 @@ pub struct Connection {
     ice_candidates: Vec<RTCIceCandidate>,
 }
 
+impl Connection {
+    pub fn get_data_channel(&self) -> Arc<RTCDataChannel> {
+        self.data_channel.clone()
+    }
+}
+
 impl Debug for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
