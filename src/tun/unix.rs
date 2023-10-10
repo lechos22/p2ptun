@@ -13,7 +13,7 @@ type PinnedThreadSafeFuture<T> = Pin<Box<dyn Future<Output = T> + Sync + Send>>;
 type OnMessageFunction = Box<dyn Fn(Vec<u8>) -> PinnedThreadSafeFuture<()> + Sync + Send>;
 
 impl Tun {
-    pub fn new(ifname: &str) -> Result<Self, anyhow::Error> {
+    pub fn new(ifname: &str) -> anyhow::Result<Self> {
         let iface = Iface::new(ifname, tun_tap::Mode::Tun)?;
         iface.set_non_blocking()?;
         Ok(Tun {
@@ -24,7 +24,7 @@ impl Tun {
     pub fn get_name(&self) -> &str {
         self.iface.name()
     }
-    pub fn send(&self, packet: &[u8]) -> Result<usize, anyhow::Error> {
+    pub fn send(&self, packet: &[u8]) -> anyhow::Result<usize> {
         Ok(self.iface.send(packet)?)
     }
     pub async fn listen(&self, on_message: OnMessageFunction) {
