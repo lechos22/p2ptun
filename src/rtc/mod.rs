@@ -1,7 +1,11 @@
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use once_cell::sync::Lazy;
-use webrtc::{peer_connection::{RTCPeerConnection, sdp::session_description::RTCSessionDescription}, ice_transport::ice_candidate::RTCIceCandidate, data_channel::RTCDataChannel};
+use webrtc::{
+    data_channel::RTCDataChannel,
+    ice_transport::ice_candidate::RTCIceCandidate,
+    peer_connection::{sdp::session_description::RTCSessionDescription, RTCPeerConnection},
+};
 
 pub mod answer;
 pub mod offer;
@@ -14,4 +18,14 @@ pub struct ConnectionInit {
     desc: RTCSessionDescription,
     data_channel: Arc<RTCDataChannel>,
     ice_candidates: Vec<RTCIceCandidate>,
+}
+
+impl Debug for ConnectionInit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ConnectionInit {{ pc: {:?}, desc: {:?}, data_channel: [...], ice_candidates: {:?} }}",
+            self.pc, self.desc, self.ice_candidates
+        )
+    }
 }
