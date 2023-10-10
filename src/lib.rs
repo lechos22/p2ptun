@@ -1,3 +1,3 @@
 #![allow(dead_code)]
-mod rtc;
-mod tun;
+pub mod rtc;
+pub mod tun;
