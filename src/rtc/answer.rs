@@ -14,7 +14,7 @@ use webrtc::{
     peer_connection::{sdp::session_description::RTCSessionDescription, RTCPeerConnection},
 };
 
-use super::{peer_connection::create_peer_connection, ConnectionInit};
+use super::{peer_connection::create_peer_connection, Connection};
 
 struct CreateAnswer {
     pc: Arc<RTCPeerConnection>,
@@ -53,7 +53,7 @@ impl CreateAnswer {
 }
 
 impl Future for CreateAnswer {
-    type Output = anyhow::Result<ConnectionInit>;
+    type Output = anyhow::Result<Connection>;
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let waker = cx.waker().clone();
         let ice_candidates = self.ice_candidates.clone();
@@ -80,7 +80,7 @@ impl Future for CreateAnswer {
         });
         match self.pc.ice_gathering_state() {
             RTCIceGatheringState::Complete => match self.ice_candidates.lock() {
-                Ok(lock) => Poll::Ready(Ok(ConnectionInit {
+                Ok(lock) => Poll::Ready(Ok(Connection {
                     pc: self.pc.clone(),
                     data_channel: self.data_channel.clone(),
                     desc: self.desc.clone(),
@@ -96,7 +96,7 @@ impl Future for CreateAnswer {
 pub async fn create_answer(
     offer: RTCSessionDescription,
     ice_candidates: Vec<RTCIceCandidateInit>,
-) -> anyhow::Result<ConnectionInit> {
+) -> anyhow::Result<Connection> {
     CreateAnswer::new(offer, ice_candidates).await?.await
 }
 

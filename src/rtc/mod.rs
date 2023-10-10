@@ -13,14 +13,14 @@ pub mod peer_connection;
 
 static WEBRTC: Lazy<webrtc::api::API> = Lazy::new(|| webrtc::api::APIBuilder::new().build());
 
-pub struct ConnectionInit {
+pub struct Connection {
     pc: Arc<RTCPeerConnection>,
     desc: RTCSessionDescription,
     data_channel: Arc<RTCDataChannel>,
     ice_candidates: Vec<RTCIceCandidate>,
 }
 
-impl Debug for ConnectionInit {
+impl Debug for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
