@@ -1,3 +1,3 @@
 # p2ptun
 
-Peer to peer VPN tunnel
+Point-to-Point VPN tunnel using WebRTC
