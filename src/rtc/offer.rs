@@ -91,13 +91,13 @@ pub async fn create_offer() -> anyhow::Result<Connection> {
 }
 
 pub async fn accept_answer(
-    connection_init: Connection,
+    connection: &Connection,
     answer: RTCSessionDescription,
     ice_candidates: Vec<RTCIceCandidateInit>,
 ) -> anyhow::Result<()> {
-    connection_init.pc.set_remote_description(answer).await?;
+    connection.pc.set_remote_description(answer).await?;
     for candidate in ice_candidates {
-        connection_init.pc.add_ice_candidate(candidate).await?;
+        connection.pc.add_ice_candidate(candidate).await?;
     }
     Ok(())
 }
