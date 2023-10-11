@@ -1,8 +1,9 @@
 #![feature(never_type)]
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::future::pending;
 use iroh_net::{key::SecretKey, MagicEndpoint, PeerAddr};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -50,7 +51,10 @@ async fn accept_connection(
     }
 }
 
-async fn run(tun_config: tun::Configuration, secret_key: SecretKey) -> anyhow::Result<MagicEndpoint> {
+async fn run(
+    tun_config: tun::Configuration,
+    secret_key: SecretKey,
+) -> anyhow::Result<MagicEndpoint> {
     let (mut tun_read, mut tun_write) = tokio::io::split(tun::create_as_async(&tun_config)?);
 
     let endpoint = MagicEndpoint::builder()
@@ -60,8 +64,6 @@ async fn run(tun_config: tun::Configuration, secret_key: SecretKey) -> anyhow::R
         .await?;
 
     while endpoint.my_derp().await.is_none() {}
-
-    println!("{}", serde_json::to_string(&endpoint.my_addr().await?)?);
 
     let mut incoming_packets = mpsc::channel::<Vec<u8>>(16);
 
@@ -96,23 +98,30 @@ async fn run(tun_config: tun::Configuration, secret_key: SecretKey) -> anyhow::R
     });
 
     // Outcoming packets router
-    let outcoming_packets_senders_clone = outcoming_packets_senders.clone();
     tokio::spawn(async move {
         let mut buffer = [0; 4096];
         loop {
             while let Ok(packet_size) = tun_read.read(&mut buffer).await {
-                for outcoming_packets_sender in outcoming_packets_senders_clone.lock().await.iter() {
-                    let _ = outcoming_packets_sender.send(buffer[..packet_size].to_vec()).await;
+                let mut run_gc = false;
+                for outcoming_packets_sender in outcoming_packets_senders.lock().await.iter() {
+                    if let Err(_) = outcoming_packets_sender
+                        .send(buffer[..packet_size].to_vec())
+                        .await
+                    {
+                        run_gc = true;
+                    }
+                }
+                if run_gc {
+                    // Outcoming packet sender garbage collection
+                    let outcoming_packets_senders_clone = outcoming_packets_senders.clone();
+                    tokio::spawn(async move {
+                        outcoming_packets_senders_clone
+                            .lock()
+                            .await
+                            .retain(|sender| !sender.is_closed());
+                    });
                 }
             }
-        }
-    });
-
-    // Outcoming packet sender garbage collection
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            outcoming_packets_senders.lock().await.retain(|sender| !sender.is_closed());
         }
     });
 
@@ -134,7 +143,9 @@ async fn main() -> anyhow::Result<!> {
 
     let endpoint = run(tun_config, secret_key).await?;
 
-    loop {
-        tokio::task::yield_now().await;
-    }
+    println!("{}", serde_json::to_string(&endpoint.my_addr().await?)?);
+
+    pending::<!>().await;
+
+    unreachable!("Unresolvable future resolved");
 }
