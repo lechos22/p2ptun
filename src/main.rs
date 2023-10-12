@@ -1,10 +1,13 @@
 #![feature(never_type)]
 
-use std::sync::Arc;
+use std::{
+    collections::HashSet,
+    io::{stdin, stdout, Write},
+    sync::Arc,
+};
 
 use anyhow::anyhow;
-use futures::future::pending;
-use iroh_net::{key::SecretKey, MagicEndpoint, PeerAddr};
+use iroh_net::{key::SecretKey, AddrInfo, MagicEndpoint, PeerAddr};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{
@@ -124,6 +127,46 @@ async fn run(
     Ok(endpoint)
 }
 
+fn dump_peer_addr(peer_addr: &PeerAddr) -> String {
+    format!(
+        "{};{};{}",
+        peer_addr.peer_id,
+        peer_addr
+            .info
+            .derp_region
+            .map(|x| x.to_string())
+            .unwrap_or("".to_string()),
+        peer_addr
+            .info
+            .direct_addresses
+            .iter()
+            .map(|sock_addr| sock_addr.to_string())
+            .collect::<Vec<_>>()
+            .join(";")
+    )
+}
+
+fn parse_peer_addr<'a>(text: &str) -> anyhow::Result<PeerAddr> {
+    let mut split = text.split(";");
+    let Some(peer_id) = split.next() else {
+        return Err(anyhow!("Bad peer address"));
+    };
+    let derp_region = match split.next() {
+        None => None,
+        Some("") => None,
+        Some(text) => Some(text.parse::<u16>()?),
+    };
+    Ok(PeerAddr {
+        peer_id: peer_id.parse()?,
+        info: AddrInfo {
+            derp_region,
+            direct_addresses: split
+                .filter_map(|addr| addr.parse().ok())
+                .collect::<HashSet<_>>(),
+        },
+    })
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<!> {
     let secret_key = match std::env::var("P2PTUN_SECRET_KEY") {
@@ -139,9 +182,33 @@ async fn main() -> anyhow::Result<!> {
 
     let endpoint = run(tun_config, secret_key).await?;
 
-    println!("{}", serde_json::to_string(&endpoint.my_addr().await?)?);
+    println!(
+        "Your address: {}",
+        dump_peer_addr(&endpoint.my_addr().await?)
+    );
 
-    pending::<!>().await;
+    let mut buffer = String::with_capacity(64);
 
-    unreachable!("Unresolvable future resolved");
+    loop {
+        print!("$$$ ");
+        stdout().flush()?;
+        stdin().read_line(&mut buffer)?;
+        let mut split = buffer.split(' ');
+        match split.next() {
+            Some("add-peer") => {
+                let Some(address) = split.next() else {
+                    continue;
+                };
+                let Ok(parsed_address) = parse_peer_addr(address) else {
+                    continue;
+                };
+                endpoint.add_peer_addr(parsed_address).await?;
+            }
+            _ => {}
+        }
+    }
+
+    // pending::<!>().await;
+
+    // unreachable!("Unresolvable future resolved");
 }
