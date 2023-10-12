@@ -112,14 +112,10 @@ async fn run(
                     }
                 }
                 if run_gc {
-                    // Outcoming packet sender garbage collection
-                    let outcoming_packets_senders_clone = outcoming_packets_senders.clone();
-                    tokio::spawn(async move {
-                        outcoming_packets_senders_clone
-                            .lock()
-                            .await
-                            .retain(|sender| !sender.is_closed());
-                    });
+                    outcoming_packets_senders
+                        .lock()
+                        .await
+                        .retain(|sender| !sender.is_closed());
                 }
             }
         }
