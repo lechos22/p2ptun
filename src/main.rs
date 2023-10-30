@@ -5,9 +5,7 @@ use iroh_net::{key::SecretKey, AddrInfo, MagicEndpoint, PeerAddr};
 use quinn::{Connection, SendStream};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    sync::{
-        Mutex, RwLock,
-    },
+    sync::Mutex,
 };
 
 const P2PTUN_ALPN: &[u8] = b"p2ptun";
@@ -32,8 +30,7 @@ async fn run(
 
     while endpoint.my_derp().await.is_none() { /* waiting for magic endpoint to work */ }
 
-    let outcoming_packet_listeners: Arc<RwLock<Vec<Mutex<SendStream>>>> = Default::default();
-    // ↑ this is basically a memory leak that may make you DoS'able
+    let outcoming_packet_listeners: Arc<Mutex<Vec<SendStream>>> = Default::default();
 
     let add_connection = {
         let outcoming_packet_listeners = outcoming_packet_listeners.clone();
@@ -43,10 +40,7 @@ async fn run(
             let outcoming_packet_listeners = outcoming_packet_listeners.clone();
             tokio::spawn(async move {
                 if let Ok(stream) = con_open.open_uni().await {
-                    outcoming_packet_listeners
-                        .write()
-                        .await
-                        .push(Mutex::new(stream));
+                    outcoming_packet_listeners.lock().await.push(stream);
                 }
             });
             tokio::spawn(async move {
@@ -78,9 +72,14 @@ async fn run(
     tokio::spawn(async move {
         let mut buf = [0u8; 4096];
         while let Ok(size) = tun_read.read(&mut buf).await {
-            for listener in outcoming_packet_listeners.read().await.iter() {
-                let _ = listener.lock().await.write(&buf[..size]).await;
+            let mut new_listeners_list: Vec<SendStream> = Vec::new();
+            let mut lock = outcoming_packet_listeners.lock().await;
+            while let Some(mut listener) = lock.pop() {
+                if let Ok(_) = listener.write(&buf[..size]).await {
+                    new_listeners_list.push(listener);
+                }
             }
+            *lock = new_listeners_list;
         }
     });
 
