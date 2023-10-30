@@ -2,161 +2,89 @@ use std::{collections::HashSet, io::stdin, sync::Arc};
 
 use anyhow::anyhow;
 use iroh_net::{key::SecretKey, AddrInfo, MagicEndpoint, PeerAddr};
+use quinn::{Connection, SendStream};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{
-        mpsc::{self, Sender},
-        Mutex,
+        Mutex, RwLock,
     },
 };
 
 const P2PTUN_ALPN: &[u8] = b"p2ptun";
 
-async fn accept_connection(
-    endpoint: &MagicEndpoint,
-    incoming_packets_sender: Sender<Vec<u8>>,
-) -> anyhow::Result<Sender<Vec<u8>>> {
-    if let Some(incoming_connection) = endpoint.accept().await {
-        println!(
-            "\nConnection from {}\n",
-            incoming_connection.remote_address()
-        );
-        let connection = incoming_connection.await?;
-        let (mut send_stream, mut recv_stream) = connection.accept_bi().await?;
-        let mut outcoming_packets = mpsc::channel::<Vec<u8>>(16);
-
-        // Incoming packet router
-        tokio::spawn(async move {
-            let mut buffer = [0; 4096];
-            while let Ok(Some(packet_size)) = recv_stream.read(&mut buffer).await {
-                if let Err(_) = incoming_packets_sender
-                    .send(buffer[..packet_size].to_vec())
-                    .await
-                {
-                    return;
-                }
-            }
-        });
-
-        // Outcoming packet sender
-        tokio::spawn(async move {
-            while let Some(packet) = outcoming_packets.1.recv().await {
-                if let Err(_) = send_stream.write(&packet).await {
-                    return;
-                }
-            }
-        });
-        Ok(outcoming_packets.0)
-    } else {
-        Err(anyhow!("MagicEndpoint is closed"))
-    }
+#[inline]
+fn duplicate<T: Clone>(el: T) -> (T, T) {
+    (el.clone(), el)
 }
 
 async fn run(
     tun_config: tun::Configuration,
     secret_key: SecretKey,
 ) -> anyhow::Result<(MagicEndpoint, impl Fn(quinn::Connection))> {
-    let (mut tun_read, mut tun_write) = tokio::io::split(tun::create_as_async(&tun_config)?);
+    let (mut tun_read, tun_write) = tokio::io::split(tun::create_as_async(&tun_config)?);
 
+    let tun_write = Arc::new(Mutex::new(tun_write));
     let endpoint = MagicEndpoint::builder()
         .secret_key(secret_key)
         .alpns(vec![P2PTUN_ALPN.to_vec()])
         .bind(0)
         .await?;
 
-    while endpoint.my_derp().await.is_none() {}
+    while endpoint.my_derp().await.is_none() { /* waiting for magic endpoint to work */ }
 
-    let mut incoming_packets = mpsc::channel::<Vec<u8>>(16);
+    let outcoming_packet_listeners: Arc<RwLock<Vec<Mutex<SendStream>>>> = Default::default();
+    // ↑ this is basically a memory leak that may make you DoS'able
 
-    // Incoming packet sender
-    tokio::spawn(async move {
-        while let Some(packet) = incoming_packets.1.recv().await {
-            if let Err(error) = tun_write.write(&packet).await {
-                eprintln!("Error: {:?}", error);
-            }
-        }
-    });
-
-    let outcoming_packets_senders = Arc::new(Mutex::new(Vec::new()));
-
-    // Magic sock connection handler
-    let endpoint_clone = endpoint.clone();
-    let outcoming_packets_senders_clone = outcoming_packets_senders.clone();
-    let incoming_packets_sender = incoming_packets.0.clone();
-    tokio::spawn(async move {
-        loop {
-            match accept_connection(&endpoint_clone, incoming_packets_sender.clone()).await {
-                Ok(outcoming_packets_sender) => {
-                    outcoming_packets_senders_clone
-                        .lock()
+    let add_connection = {
+        let outcoming_packet_listeners = outcoming_packet_listeners.clone();
+        move |con: Connection| {
+            let (con_open, con_accept) = duplicate(con);
+            let tun_write = tun_write.clone();
+            let outcoming_packet_listeners = outcoming_packet_listeners.clone();
+            tokio::spawn(async move {
+                if let Ok(stream) = con_open.open_uni().await {
+                    outcoming_packet_listeners
+                        .write()
                         .await
-                        .push(outcoming_packets_sender);
+                        .push(Mutex::new(stream));
                 }
-                Err(error) => {
-                    eprintln!("Error: {:?}", error);
-                }
-            }
-        }
-    });
-
-    // Outcoming packets router
-    let outcoming_packets_senders_clone = outcoming_packets_senders.clone();
-    tokio::spawn(async move {
-        let mut buffer = [0; 4096];
-        loop {
-            while let Ok(packet_size) = tun_read.read(&mut buffer).await {
-                let mut run_gc = false;
-                for outcoming_packets_sender in outcoming_packets_senders_clone.lock().await.iter()
-                {
-                    if let Err(_) = outcoming_packets_sender
-                        .send(buffer[..packet_size].to_vec())
-                        .await
-                    {
-                        run_gc = true;
+            });
+            tokio::spawn(async move {
+                if let Ok(mut stream) = con_accept.accept_uni().await {
+                    let mut buf = [0u8; 4096];
+                    while let Ok(size) = stream.read(&mut buf).await {
+                        if let Some(size) = size {
+                            let _ = tun_write.lock().await.write(&buf[..size]).await;
+                        }
                     }
                 }
-                if run_gc {
-                    outcoming_packets_senders_clone
-                        .lock()
-                        .await
-                        .retain(|sender| !sender.is_closed());
-                }
-            }
+            });
         }
-    });
+    };
 
-    Ok((endpoint, move |connection: quinn::Connection| {
-        let outcoming_packet_senders = outcoming_packets_senders.clone();
-        let incoming_packets_sender = incoming_packets.0.clone();
+    {
+        let endpoint = endpoint.clone();
+        let add_connection = add_connection.clone();
         tokio::spawn(async move {
-            let Ok((mut send_stream, mut recv_stream)) = connection.open_bi().await else {
-                return;
-            };
-            let mut outcoming_packets = mpsc::channel::<Vec<u8>>(16);
-            tokio::spawn(async move {
-                let mut buffer = [0; 4096];
-                while let Ok(Some(packet_size)) = recv_stream.read(&mut buffer).await {
-                    if let Err(_) = incoming_packets_sender
-                        .send(buffer[..packet_size].to_vec())
-                        .await
-                    {
-                        return;
-                    }
+            while let Some(connecting) = endpoint.accept().await {
+                println!("\nConnection from {}\n", connecting.remote_address());
+                if let Ok(con) = connecting.await {
+                    add_connection(con);
                 }
-            });
-            tokio::spawn(async move {
-                while let Some(packet) = outcoming_packets.1.recv().await {
-                    if let Err(_) = send_stream.write(&packet).await {
-                        return;
-                    }
-                }
-            });
-            outcoming_packet_senders
-                .lock()
-                .await
-                .push(outcoming_packets.0);
+            }
         });
-    }))
+    }
+
+    tokio::spawn(async move {
+        let mut buf = [0u8; 4096];
+        while let Ok(size) = tun_read.read(&mut buf).await {
+            for listener in outcoming_packet_listeners.read().await.iter() {
+                let _ = listener.lock().await.write(&buf[..size]).await;
+            }
+        }
+    });
+
+    Ok((endpoint, add_connection))
 }
 
 fn dump_peer_addr(peer_addr: &PeerAddr) -> String {
