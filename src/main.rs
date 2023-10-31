@@ -35,20 +35,34 @@ async fn run(
     let add_connection = {
         let outcoming_packet_listeners = outcoming_packet_listeners.clone();
         move |con: Connection| {
+            eprintln!("Connecting to {}", con.remote_address());
             let (con_open, con_accept) = duplicate(con);
             let tun_write = tun_write.clone();
             let outcoming_packet_listeners = outcoming_packet_listeners.clone();
             tokio::spawn(async move {
-                if let Ok(stream) = con_open.open_uni().await {
-                    outcoming_packet_listeners.lock().await.push(stream);
+                match con_open.open_uni().await {
+                    Ok(stream) => {
+                        outcoming_packet_listeners.lock().await.push(stream);
+                    }
+                    Err(err) => {
+                        eprintln!("{}", err);
+                    }
                 }
             });
             tokio::spawn(async move {
-                if let Ok(mut stream) = con_accept.accept_uni().await {
-                    let mut buf = [0u8; 4096];
-                    while let Ok(size) = stream.read(&mut buf).await {
-                        if let Some(size) = size {
-                            let _ = tun_write.lock().await.write(&buf[..size]).await;
+                let mut stream = match con_accept.accept_uni().await {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        eprintln!("{}", err);
+                        return;
+                    }
+                };
+                let mut buf = [0u8; 4096];
+                while let Ok(size) = stream.read(&mut buf).await {
+                    if let Some(size) = size {
+                        if let Err(err) = tun_write.lock().await.write(&buf[..size]).await {
+                            eprintln!("{}", err);
+                            continue;
                         }
                     }
                 }
@@ -61,9 +75,13 @@ async fn run(
         let add_connection = add_connection.clone();
         tokio::spawn(async move {
             while let Some(connecting) = endpoint.accept().await {
-                eprintln!("Connection from {}", connecting.remote_address());
-                if let Ok(con) = connecting.await {
-                    add_connection(con);
+                match connecting.await {
+                    Ok(con) => {
+                        add_connection(con);
+                    }
+                    Err(err) => {
+                        eprintln!("{}", err);
+                    }
                 }
             }
         });
@@ -146,8 +164,12 @@ async fn main() -> anyhow::Result<()> {
     let window = MainWindow::new()?;
     window.set_peer_addr(my_addr.clone().into());
     window.on_copy_addr(move || {
-        let Ok(mut clipboard) = arboard::Clipboard::new() else {
-            return;
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(val) => val,
+            Err(err) => {
+                eprintln!("{}", err);
+                return;
+            }
         };
         let _ = clipboard.set_text(my_addr.clone());
     });
