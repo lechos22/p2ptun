@@ -1,4 +1,4 @@
-use std::{collections::HashSet, io::stdin, sync::Arc};
+use std::{collections::BTreeSet, sync::Arc};
 
 use anyhow::anyhow;
 use iroh_net::{key::SecretKey, AddrInfo, MagicEndpoint, PeerAddr};
@@ -61,7 +61,7 @@ async fn run(
         let add_connection = add_connection.clone();
         tokio::spawn(async move {
             while let Some(connecting) = endpoint.accept().await {
-                println!("\nConnection from {}\n", connecting.remote_address());
+                eprintln!("Connection from {}", connecting.remote_address());
                 if let Ok(con) = connecting.await {
                     add_connection(con);
                 }
@@ -121,7 +121,7 @@ fn parse_peer_addr<'a>(text: &str) -> anyhow::Result<PeerAddr> {
             derp_region,
             direct_addresses: split
                 .filter_map(|addr| addr.parse().ok())
-                .collect::<HashSet<_>>(),
+                .collect::<BTreeSet<_>>(),
         },
     })
 }
@@ -140,29 +140,80 @@ async fn main() -> anyhow::Result<()> {
     tun_config.up();
 
     let (endpoint, add_connection) = run(tun_config, secret_key).await?;
+    let my_addr = dump_peer_addr(&endpoint.my_addr().await?);
+    let add_connection = Arc::new(add_connection);
 
-    println!(
-        "Your address: {}",
-        dump_peer_addr(&endpoint.my_addr().await?)
-    );
+    let window = MainWindow::new()?;
+    window.set_peer_addr(my_addr.clone().into());
+    window.on_copy_addr(move || {
+        let Ok(mut clipboard) = arboard::Clipboard::new() else {
+            return;
+        };
+        let _ = clipboard.set_text(my_addr.clone());
+    });
+    window.on_add_peer(move |address| {
+        let address = address.to_owned();
+        let endpoint = endpoint.clone();
+        let add_connection = add_connection.clone();
+        tokio::spawn(async move {
+            let parsed_address = match parse_peer_addr(&address) {
+                Ok(val) => val,
+                Err(err) => {
+                    eprintln!("{}", err);
+                    return;
+                }
+            };
+            let connection = match endpoint.connect(parsed_address, P2PTUN_ALPN).await {
+                Ok(val) => val,
+                Err(err) => {
+                    eprintln!("{}", err);
+                    return;
+                }
+            };
+            add_connection(connection);
+        });
+    });
+    window.run()?;
+    Ok(())
+}
 
-    let mut buffer = String::with_capacity(64);
-
-    loop {
-        stdin().read_line(&mut buffer)?;
-        let mut split = buffer.split(' ');
-        match split.next() {
-            Some("add-peer") => {
-                let Some(address) = split.next() else {
-                    continue;
-                };
-                let Ok(parsed_address) = parse_peer_addr(address) else {
-                    continue;
-                };
-                let connection = endpoint.connect(parsed_address, P2PTUN_ALPN).await?;
-                add_connection(connection);
+slint::slint! {
+    import { Button , TextEdit, ScrollView} from "std-widgets.slint";
+    export component MainWindow inherits Window {
+        callback add_peer(string);
+        callback copy_addr();
+        in property <string> peer_addr;
+        width: 800px;
+        height: 600px;
+        VerticalLayout {
+            height: 20rem;
+            width: 40rem;
+            ScrollView {
+                height: 3rem;
+                viewport-width: t.width + 1rem;
+                padding: 0.5rem;
+                t := Text {
+                    text: peer-addr;
+                }
             }
-            _ => {}
+            Button {
+                text: "Copy address";
+                height: 2rem;
+                clicked => {
+                    copy-addr();
+                }
+            }
+            text_input := TextEdit {
+                padding: 0.5rem;
+                height: 3rem;
+            }
+            Button {
+                text: "Add peer";
+                height: 2rem;
+                clicked => {
+                    add-peer(text-input.text);
+                }
+            }
         }
     }
 }

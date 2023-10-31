@@ -10,4 +10,7 @@ tokio = "1"
 tun = { version = "0.6", features = ["async"] }
 anyhow = "1"
 quinn = "0.10"
-iroh-net = { version = "0.7", default-features = false }
+iroh-net = { version = "0.8", default-features = false }
+slint = "1"
+arboard = "3"
+rustls = "0.21"
