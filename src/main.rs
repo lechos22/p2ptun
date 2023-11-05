@@ -1,143 +1,14 @@
-use std::{collections::BTreeSet, future::Future, pin::Pin, sync::Arc};
+mod application;
+mod constants;
+mod peer_arddr;
 
-use anyhow::anyhow;
-use iroh_net::{key::SecretKey, AddrInfo, MagicEndpoint, PeerAddr};
-use quinn::{Connection, SendStream};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
-    sync::Mutex,
-};
+use std::sync::Arc;
 
-const P2PTUN_ALPN: &[u8] = b"p2ptun";
-
-struct ApplicationState {
-    tun_write: Mutex<WriteHalf<tun::AsyncDevice>>,
-    packet_listeners: Mutex<Vec<SendStream>>,
-    endpoint: MagicEndpoint,
-}
-
-trait Application {
-    fn add_connection(&self, connection: Connection);
-    fn open_stream(&self, connection: Connection);
-    fn accept_stream(&self, connection: Connection);
-    fn accept_incoming_connections(&self);
-    fn send_outcoming_packets(&self, tun_read: ReadHalf<tun::AsyncDevice>);
-    fn get_addr(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<PeerAddr>>>>;
-    fn add_peer_from_address(&self, address: String);
-}
-
-impl Application for Arc<ApplicationState> {
-    fn add_connection(&self, con: Connection) {
-        eprintln!("Connecting to {}", con.remote_address());
-        let con = duplicate(con);
-        self.open_stream(con.0);
-        self.accept_stream(con.1);
-    }
-
-    fn open_stream(&self, connection: Connection) {
-        let state = self.clone();
-        tokio::spawn(async move {
-            match connection.open_uni().await {
-                Ok(stream) => {
-                    state.packet_listeners.lock().await.push(stream);
-                }
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            }
-        });
-    }
-
-    fn accept_stream(&self, connection: Connection) {
-        let state = self.clone();
-        tokio::spawn(async move {
-            let mut stream = match connection.accept_uni().await {
-                Ok(stream) => stream,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            };
-            let mut buf = [0u8; 4096];
-            while let Ok(size) = stream.read(&mut buf).await {
-                if let Some(size) = size {
-                    if let Err(err) = state.tun_write.lock().await.write(&buf[..size]).await {
-                        eprintln!("{}", err);
-                        return;
-                    }
-                }
-            }
-        });
-    }
-
-    fn accept_incoming_connections(&self) {
-        let state = self.clone();
-        tokio::spawn(async move {
-            while let Some(connecting) = state.endpoint.accept().await {
-                match connecting.await {
-                    Ok(con) => {
-                        state.add_connection(con);
-                    }
-                    Err(err) => {
-                        eprintln!("{}", err);
-                        return;
-                    }
-                }
-            }
-        });
-    }
-
-    fn send_outcoming_packets(&self, mut tun_read: ReadHalf<tun::AsyncDevice>) {
-        let state = self.clone();
-        tokio::spawn(async move {
-            let mut buf = [0u8; 4096];
-            while let Ok(size) = tun_read.read(&mut buf).await {
-                let mut new_listeners_list: Vec<SendStream> = Vec::new();
-                let mut lock = state.packet_listeners.lock().await;
-                while let Some(mut listener) = lock.pop() {
-                    if let Ok(_) = listener.write(&buf[..size]).await {
-                        new_listeners_list.push(listener);
-                    }
-                }
-                *lock = new_listeners_list;
-            }
-        });
-    }
-
-    fn add_peer_from_address(&self, address: String) {
-        let state = self.clone();
-        tokio::spawn(async move {
-            let parsed_address = match parse_peer_addr(&address) {
-                Ok(val) => val,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            };
-            let connection = match state.endpoint.connect(parsed_address, P2PTUN_ALPN).await {
-                Ok(val) => val,
-                Err(err) => {
-                    eprintln!("{}", err);
-                    return;
-                }
-            };
-            state.add_connection(connection);
-        });
-    }
-
-    fn get_addr(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<PeerAddr>>>> {
-        let state = self.clone();
-        Box::pin(async move {
-            state.endpoint.my_addr().await
-        })
-    }
-}
-
-#[inline]
-fn duplicate<T: Clone>(el: T) -> (T, T) {
-    (el.clone(), el)
-}
+use application::{Application, ApplicationState};
+use constants::P2PTUN_ALPN;
+use iroh_net::{key::SecretKey, MagicEndpoint};
+use peer_arddr::dump_peer_addr;
+use tokio::io::{ReadHalf, WriteHalf};
 
 fn create_async_tun(
     config: tun::Configuration,
@@ -156,54 +27,10 @@ async fn run(
         .bind(0)
         .await?;
     while endpoint.my_derp().await.is_none() { /* waiting for DERP in an ugly, but working way */ }
-    let state = Arc::new(ApplicationState {
-        endpoint: endpoint,
-        packet_listeners: Mutex::<Vec<SendStream>>::default(),
-        tun_write: Mutex::new(tun_write),
-    });
+    let state = Arc::new(ApplicationState::create(endpoint, tun_write));
     state.accept_incoming_connections();
     state.send_outcoming_packets(tun_read);
     Ok(state)
-}
-
-fn dump_peer_addr(peer_addr: &PeerAddr) -> String {
-    format!(
-        "{};{};{}",
-        peer_addr.peer_id,
-        peer_addr
-            .info
-            .derp_region
-            .map(|x| x.to_string())
-            .unwrap_or("".to_string()),
-        peer_addr
-            .info
-            .direct_addresses
-            .iter()
-            .map(|sock_addr| sock_addr.to_string())
-            .collect::<Vec<_>>()
-            .join(";")
-    )
-}
-
-fn parse_peer_addr<'a>(text: &str) -> anyhow::Result<PeerAddr> {
-    let mut split = text.split(";");
-    let Some(peer_id) = split.next() else {
-        return Err(anyhow!("Bad peer address"));
-    };
-    let derp_region = match split.next() {
-        None => None,
-        Some("") => None,
-        Some(text) => Some(text.parse::<u16>()?),
-    };
-    Ok(PeerAddr {
-        peer_id: peer_id.parse()?,
-        info: AddrInfo {
-            derp_region,
-            direct_addresses: split
-                .filter_map(|addr| addr.parse().ok())
-                .collect::<BTreeSet<_>>(),
-        },
-    })
 }
 
 #[tokio::main]
