@@ -2,36 +2,9 @@ mod application;
 mod constants;
 mod peer_arddr;
 
-use std::sync::Arc;
-
 use application::{Application, ApplicationState};
-use constants::P2PTUN_ALPN;
-use iroh_net::{key::SecretKey, MagicEndpoint};
+use iroh_net::key::SecretKey;
 use peer_arddr::dump_peer_addr;
-use tokio::io::{ReadHalf, WriteHalf};
-
-fn create_async_tun(
-    config: tun::Configuration,
-) -> anyhow::Result<(ReadHalf<tun::AsyncDevice>, WriteHalf<tun::AsyncDevice>)> {
-    Ok(tokio::io::split(tun::create_as_async(&config)?))
-}
-
-async fn run(
-    tun_config: tun::Configuration,
-    secret_key: SecretKey,
-) -> anyhow::Result<impl Application + Clone> {
-    let (tun_read, tun_write) = create_async_tun(tun_config)?;
-    let endpoint = MagicEndpoint::builder()
-        .secret_key(secret_key)
-        .alpns(vec![P2PTUN_ALPN.to_vec()])
-        .bind(0)
-        .await?;
-    while endpoint.my_derp().await.is_none() { /* waiting for DERP in an ugly, but working way */ }
-    let state = Arc::new(ApplicationState::create(endpoint, tun_write));
-    state.accept_incoming_connections();
-    state.send_outcoming_packets(tun_read);
-    Ok(state)
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -43,10 +16,13 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut tun_config = tun::configure();
-    tun_config.up();
+    let tun_config = {
+        let mut tun_config = tun::configure();
+        tun_config.up();
+        tun_config
+    };
 
-    let state = run(tun_config, secret_key).await?;
+    let state = ApplicationState::start_application(secret_key, tun_config).await?;
     let my_addr = dump_peer_addr(&state.get_addr().await?);
 
     let window = MainWindow::new()?;

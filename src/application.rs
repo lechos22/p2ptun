@@ -1,13 +1,13 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use iroh_net::{MagicEndpoint, PeerAddr};
+use iroh_net::{key::SecretKey, MagicEndpoint, PeerAddr};
 use quinn::{Connection, SendStream};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     sync::Mutex,
 };
 
-use crate::{peer_arddr::parse_peer_addr, constants::P2PTUN_ALPN};
+use crate::{constants::P2PTUN_ALPN, peer_arddr::parse_peer_addr};
 
 pub struct ApplicationState {
     tun_write: Mutex<WriteHalf<tun::AsyncDevice>>,
@@ -15,39 +15,45 @@ pub struct ApplicationState {
     endpoint: MagicEndpoint,
 }
 
+fn create_async_tun(
+    config: tun::Configuration,
+) -> anyhow::Result<(ReadHalf<tun::AsyncDevice>, WriteHalf<tun::AsyncDevice>)> {
+    Ok(tokio::io::split(tun::create_as_async(&config)?))
+}
+
 impl ApplicationState {
-    pub fn create(endpoint: MagicEndpoint, tun_write: WriteHalf<tun::AsyncDevice>) -> Self {
-        Self {
-            tun_write: Mutex::new(tun_write),
-            packet_listeners: Default::default(),
-            endpoint,
-        }
+    pub fn start_application(
+        secret_key: SecretKey,
+        tun_config: tun::Configuration,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Arc<Self>>>>> {
+        Box::pin(async move {
+            let endpoint = MagicEndpoint::builder()
+                .secret_key(secret_key)
+                .alpns(vec![P2PTUN_ALPN.to_vec()])
+                .bind(0)
+                .await?;
+            while endpoint.my_derp().await.is_none() {
+                // waiting for DERP in an ugly, but working way
+            }
+            let (tun_read, tun_write) = create_async_tun(tun_config)?;
+            let state = Arc::new(Self {
+                tun_write: Mutex::new(tun_write),
+                packet_listeners: Default::default(),
+                endpoint,
+            });
+
+            state.accept_incoming_connections();
+            state.send_outcoming_packets(tun_read);
+
+            Ok(state)
+        })
     }
-}
 
-pub trait Application {
-    fn add_connection(&self, connection: Connection);
-    fn open_stream(&self, connection: Connection);
-    fn accept_stream(&self, connection: Connection);
-    fn accept_incoming_connections(&self);
-    fn send_outcoming_packets(&self, tun_read: ReadHalf<tun::AsyncDevice>);
-    fn get_addr(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<PeerAddr>>>>;
-    fn add_peer_from_address(&self, address: String);
-}
-
-impl Application for Arc<ApplicationState> {
-    fn add_connection(&self, con: Connection) {
-        eprintln!("Connecting to {}", con.remote_address());
-        self.open_stream(con.clone());
-        self.accept_stream(con);
-    }
-
-    fn open_stream(&self, connection: Connection) {
-        let state = self.clone();
+    fn open_stream(self: Arc<ApplicationState>, connection: Connection) {
         tokio::spawn(async move {
             match connection.open_uni().await {
                 Ok(stream) => {
-                    state.packet_listeners.lock().await.push(stream);
+                    self.packet_listeners.lock().await.push(stream);
                 }
                 Err(err) => {
                     eprintln!("{}", err);
@@ -57,8 +63,7 @@ impl Application for Arc<ApplicationState> {
         });
     }
 
-    fn accept_stream(&self, connection: Connection) {
-        let state = self.clone();
+    fn accept_stream(self: Arc<ApplicationState>, connection: Connection) {
         tokio::spawn(async move {
             let mut stream = match connection.accept_uni().await {
                 Ok(stream) => stream,
@@ -70,13 +75,29 @@ impl Application for Arc<ApplicationState> {
             let mut buf = [0u8; 4096];
             while let Ok(size) = stream.read(&mut buf).await {
                 if let Some(size) = size {
-                    if let Err(err) = state.tun_write.lock().await.write(&buf[..size]).await {
+                    if let Err(err) = self.tun_write.lock().await.write(&buf[..size]).await {
                         eprintln!("{}", err);
                         return;
                     }
                 }
             }
         });
+    }
+}
+
+pub trait Application {
+    fn add_connection(&self, connection: Connection);
+    fn accept_incoming_connections(&self);
+    fn send_outcoming_packets(&self, tun_read: ReadHalf<tun::AsyncDevice>);
+    fn get_addr(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<PeerAddr>>>>;
+    fn add_peer_from_address(&self, address: String);
+}
+
+impl Application for Arc<ApplicationState> {
+    fn add_connection(&self, con: Connection) {
+        eprintln!("Connecting to {}", con.remote_address());
+        self.clone().open_stream(con.clone());
+        self.clone().accept_stream(con);
     }
 
     fn accept_incoming_connections(&self) {
