@@ -32,7 +32,7 @@ impl ApplicationState {
                 .alpns(vec![P2PTUN_ALPN.to_vec()])
                 .bind(0)
                 .await?;
-            while endpoint.my_derp().await.is_none() {
+            while endpoint.my_derp().is_none() {
                 // waiting for DERP in an ugly, but working way
             }
             let (tun_read, tun_write) = create_async_tun(tun_config)?;
