@@ -1,12 +1,12 @@
 mod application;
 mod constants;
-mod peer_arddr;
+mod peer_addr;
 
 use std::{io::stdin, net::Ipv4Addr};
 
 use application::{Application, ApplicationState};
 use iroh_net::key::SecretKey;
-use peer_arddr::dump_peer_addr;
+use peer_addr::dump_peer_addr;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

@@ -1,13 +1,13 @@
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use iroh_net::{key::SecretKey, MagicEndpoint, PeerAddr};
-use quinn::{Connection, SendStream};
+use quinn::{Connection, ReadError, RecvStream, SendStream, WriteError};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
     sync::Mutex,
 };
 
-use crate::{constants::P2PTUN_ALPN, peer_arddr::parse_peer_addr};
+use crate::{constants::P2PTUN_ALPN, peer_addr::parse_peer_addr};
 
 pub struct ApplicationState {
     tun_write: Mutex<WriteHalf<tun::AsyncDevice>>,
@@ -33,7 +33,8 @@ impl ApplicationState {
                 .bind(0)
                 .await?;
             while endpoint.my_derp().is_none() {
-                // waiting for DERP in an ugly, but working way
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                eprintln!("Waiting for DERP...");
             }
             let (tun_read, tun_write) = create_async_tun(tun_config)?;
             let state = Arc::new(Self {
@@ -49,12 +50,36 @@ impl ApplicationState {
         })
     }
 
+    async fn handle_streams(
+        &self,
+        connection: Connection,
+        (send, mut recv): (SendStream, RecvStream),
+    ) {
+        self.packet_listeners.lock().await.push(send);
+        let mut buf = [0u8; 4096];
+        loop {
+            match recv.read(&mut buf).await {
+                Ok(None)
+                | Err(ReadError::ConnectionLost(_))
+                | Err(ReadError::Reset(_))
+                | Err(ReadError::UnknownStream) => {
+                    break;
+                }
+                Ok(Some(size)) => {
+                    eprintln!("Received {} bytes from {}", size, connection.stable_id());
+                    if let Err(err) = self.tun_write.lock().await.write(&buf[..size]).await {
+                        eprintln!("{}", err);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn open_stream(self: Arc<ApplicationState>, connection: Connection) {
         tokio::spawn(async move {
-            match connection.open_uni().await {
-                Ok(stream) => {
-                    self.packet_listeners.lock().await.push(stream);
-                }
+            match connection.open_bi().await {
+                Ok(streams) => self.handle_streams(connection, streams).await,
                 Err(err) => {
                     eprintln!("{}", err);
                     return;
@@ -65,28 +90,18 @@ impl ApplicationState {
 
     fn accept_stream(self: Arc<ApplicationState>, connection: Connection) {
         tokio::spawn(async move {
-            let mut stream = match connection.accept_uni().await {
-                Ok(stream) => stream,
+            match connection.accept_bi().await {
+                Ok(streams) => self.handle_streams(connection, streams).await,
                 Err(err) => {
                     eprintln!("{}", err);
                     return;
                 }
             };
-            let mut buf = [0u8; 4096];
-            while let Ok(size) = stream.read(&mut buf).await {
-                if let Some(size) = size {
-                    if let Err(err) = self.tun_write.lock().await.write(&buf[..size]).await {
-                        eprintln!("{}", err);
-                        return;
-                    }
-                }
-            }
         });
     }
 }
 
 pub trait Application {
-    fn add_connection(&self, connection: Connection);
     fn accept_incoming_connections(&self);
     fn send_outcoming_packets(&self, tun_read: ReadHalf<tun::AsyncDevice>);
     fn get_addr(&self) -> Pin<Box<dyn Future<Output = anyhow::Result<PeerAddr>>>>;
@@ -94,19 +109,14 @@ pub trait Application {
 }
 
 impl Application for Arc<ApplicationState> {
-    fn add_connection(&self, con: Connection) {
-        eprintln!("Connecting to {}", con.remote_address());
-        self.clone().open_stream(con.clone());
-        self.clone().accept_stream(con);
-    }
-
     fn accept_incoming_connections(&self) {
         let state = self.clone();
         tokio::spawn(async move {
             while let Some(connecting) = state.endpoint.accept().await {
                 match connecting.await {
-                    Ok(con) => {
-                        state.add_connection(con);
+                    Ok(connection) => {
+                        eprintln!("Connected to {}", connection.stable_id());
+                        state.clone().accept_stream(connection);
                     }
                     Err(err) => {
                         eprintln!("{}", err);
@@ -122,11 +132,17 @@ impl Application for Arc<ApplicationState> {
         tokio::spawn(async move {
             let mut buf = [0u8; 4096];
             while let Ok(size) = tun_read.read(&mut buf).await {
+                eprintln!("Sending {} bytes", size);
                 let mut new_listeners_list: Vec<SendStream> = Vec::new();
                 let mut lock = state.packet_listeners.lock().await;
                 while let Some(mut listener) = lock.pop() {
-                    if let Ok(_) = listener.write(&buf[..size]).await {
-                        new_listeners_list.push(listener);
+                    match listener.write(&buf[..size]).await {
+                        Ok(0)
+                        | Err(WriteError::UnknownStream)
+                        | Err(WriteError::ConnectionLost(_)) => {}
+                        _ => {
+                            new_listeners_list.push(listener);
+                        }
                     }
                 }
                 *lock = new_listeners_list;
@@ -151,7 +167,8 @@ impl Application for Arc<ApplicationState> {
                     return;
                 }
             };
-            state.add_connection(connection);
+            eprintln!("Connected to {}", connection.stable_id());
+            state.open_stream(connection);
         });
     }
 
