@@ -1669,6 +1669,10 @@ dependencies = [
 [[package]]
 name = "p2ptun"
 version = "0.1.0"
+
+[[package]]
+name = "p2ptund"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "iroh-net",
@@ -1677,10 +1681,6 @@ dependencies = [
  "tokio",
  "tun",
 ]
-
-[[package]]
-name = "p2ptunctl"
-version = "0.1.0"
 
 [[package]]
 name = "p384"

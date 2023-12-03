@@ -6,7 +6,7 @@ mod peer_addr;
 use std::net::Ipv4Addr;
 
 use application::{Application, ApplicationState};
-use control_socket::ControlSocket;
+use control_socket::ControlSocketLogic;
 use iroh_net::key::SecretKey;
 use peer_addr::dump_peer_addr;
 
@@ -43,9 +43,7 @@ async fn main() -> anyhow::Result<()> {
     let my_addr = dump_peer_addr(&state.get_addr().await?);
     println!("{}", my_addr);
 
-    let socket = ControlSocket::new(state).await?;
-
-    socket.listen().await?;
+    ControlSocketLogic::listen(state).await?;
 
     Ok(())
 }
