@@ -26,11 +26,14 @@ pub trait ChannelManager {
     fn open(&self) -> impl Future<Output = Arc<dyn Channel>> + Send;
 
     /// Runs the channel manager, continuously handling packet publishing and subscribing.
-    fn run(self, packet_sender: broadcast::Sender<Packet>) -> impl Future<Output = !> + Send
+    fn run(
+        self,
+        packet_sender: broadcast::Sender<Packet>,
+    ) -> Pin<Box<dyn Future<Output = !> + Send>>
     where
-        Self: Sized + Sync + Send,
+        Self: Sized + Sync + Send + 'static,
     {
-        async move {
+        Box::pin(async move {
             let mut channel = self.open().await;
             loop {
                 let mut join_set = JoinSet::new();
@@ -39,7 +42,7 @@ pub trait ChannelManager {
                 let _ = join_set.join_next().await;
                 channel = self.open().await;
             }
-        }
+        })
     }
 }
 

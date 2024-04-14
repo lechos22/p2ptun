@@ -37,12 +37,15 @@ impl Daemon {
             channel_jobs: JoinSet::new(),
         }
     }
+    /// Spawns a job for handling some channel.
+    fn spawn_channel_job(&mut self, channel_manager: impl ChannelManager + Send + Sync + 'static) {
+        let job = channel_manager.run(self.packet_sender.clone());
+        self.channel_jobs.spawn(job);
+    }
     /// Runs the daemon.
     pub async fn run(mut self) {
-        self.channel_jobs
-            .spawn(LogChannelManager.run(self.packet_sender.clone()));
-        self.channel_jobs
-            .spawn(NoiseChannelManager.run(self.packet_sender.clone()));
+        self.spawn_channel_job(LogChannelManager);
+        self.spawn_channel_job(NoiseChannelManager);
 
         // Await for Ctrl+C
         let _ = tokio::signal::ctrl_c().await;
