@@ -10,7 +10,7 @@ use tokio::{
 };
 
 use self::channel::{
-    log_channel::LogChannelManager, noise_channel::NoiseChannelManager, ChannelManager, Packet,
+    log_channel::LogChannelManager, tun_channel::TunChannelManager, ChannelManager, Packet,
 };
 
 /// An async function that sleeps forever.
@@ -45,7 +45,7 @@ impl Daemon {
     /// Runs the daemon.
     pub async fn run(mut self) {
         self.spawn_channel_job(LogChannelManager);
-        self.spawn_channel_job(NoiseChannelManager);
+        self.spawn_channel_job(TunChannelManager);
 
         // Await for Ctrl+C
         let _ = tokio::signal::ctrl_c().await;

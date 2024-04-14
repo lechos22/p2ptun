@@ -1,5 +1,6 @@
 pub mod log_channel;
 pub mod noise_channel;
+pub mod tun_channel;
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -15,7 +16,11 @@ pub enum Packet {
 }
 
 /// Custom error type for channel operations.
-pub enum ChannelError {}
+pub enum ChannelError {
+    Poisoned,
+    Closed,
+    Io(std::io::Error),
+}
 
 /// A future type representing the result of a channel operation.
 pub type ChannelJobFuture = Pin<Box<dyn Future<Output = Result<(), ChannelError>> + Send>>;
