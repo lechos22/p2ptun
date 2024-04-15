@@ -14,7 +14,7 @@ use self::{
     channel::{
         log_channel::LogChannelManager, noise_channel::NoiseChannelManager, ChannelManager, Packet,
     },
-    channel_group::ChannelGroup,
+    channel_group::{iroh_channel_group::IrohChannelGroup, ChannelGroup},
 };
 
 /// An async function that sleeps forever.
@@ -62,6 +62,7 @@ impl Daemon {
                 self.spawn_channel_job(NoiseChannelManager);
             }
         }
+        self.spawn_channel_group_job(IrohChannelGroup::new().await);
 
         // Await for Ctrl+C
         let _ = tokio::signal::ctrl_c().await;

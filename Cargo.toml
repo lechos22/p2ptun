@@ -3,6 +3,10 @@ name = "p2ptun"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+iroh-net = "0.13"
+quinn = "0.10.2"
+
 [dependencies.tokio]
 version = "1.37.0"
 features = ["rt-multi-thread", "sync", "signal", "time", "macros"]

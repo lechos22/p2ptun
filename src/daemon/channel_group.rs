@@ -1,3 +1,5 @@
+pub mod iroh_channel_group;
+
 use std::future::Future;
 
 use tokio::sync::broadcast;
