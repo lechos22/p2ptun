@@ -5,6 +5,7 @@ pub mod channel_group;
 
 use std::time::Duration;
 
+use iroh_net::key::SecretKey;
 use tokio::{
     sync::broadcast::{self, Sender},
     task::JoinSet,
@@ -25,20 +26,24 @@ async fn sleep_forever<T>() -> T {
 
 /// The p2ptun's daemon configuration
 #[derive(Default)]
-pub struct DaemonConfig {}
+pub struct DaemonConfig {
+    secret_key: Option<SecretKey>,
+}
 
 /// The p2ptun's daemon
 pub struct Daemon {
     packet_sender: Sender<Packet>,
     channel_jobs: JoinSet<!>,
+    secret_key: SecretKey,
 }
 
 impl Daemon {
     /// Creates the daemon.
-    pub fn new(_config: DaemonConfig) -> Self {
+    pub fn new(config: DaemonConfig) -> Self {
         Self {
             packet_sender: broadcast::channel(64).0,
             channel_jobs: JoinSet::new(),
+            secret_key: config.secret_key.unwrap_or_else(SecretKey::generate),
         }
     }
     /// Spawns a job for handling some channel.
@@ -62,7 +67,10 @@ impl Daemon {
                 self.spawn_channel_job(NoiseChannelManager);
             }
         }
-        self.spawn_channel_group_job(IrohChannelGroup::new().await);
+        println!("Node ID: {}", self.secret_key.public());
+        let iroh_channel_group = IrohChannelGroup::new(self.secret_key.clone()).await;
+        let _iroh_channel_group_command_sender = iroh_channel_group.get_command_sender();
+        self.spawn_channel_group_job(iroh_channel_group);
 
         // Await for Ctrl+C
         let _ = tokio::signal::ctrl_c().await;
