@@ -13,6 +13,7 @@ use crate::daemon::actors::{
 #[derive(Default)]
 pub struct DaemonConfig {}
 
+/// Enum representing errors that can happen in p2ptun's daemon
 #[derive(Debug)]
 pub enum DaemonError {
     TunError(tun::Error),
