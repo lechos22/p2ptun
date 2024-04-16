@@ -3,6 +3,9 @@ name = "p2ptun"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+tun = { version = "0.6.1", features = ["async"] }
+
 [dependencies.tokio]
 version = "1.37.0"
-features = ["rt-multi-thread", "sync", "signal", "time", "macros"]
+features = ["rt-multi-thread", "sync", "signal", "time", "macros", "io-util"]

@@ -15,7 +15,14 @@ pub struct DaemonConfig {}
 
 #[derive(Debug)]
 pub enum DaemonError {
+    TunError(tun::Error),
     Died,
+}
+
+impl From<tun::Error> for DaemonError {
+    fn from(error: tun::Error) -> Self {
+        Self::TunError(error)
+    }
 }
 
 /// The p2ptun's daemon
@@ -23,7 +30,7 @@ pub async fn run_daemon(_config: DaemonConfig) -> Result<(), DaemonError> {
     // Initialize actors
     let mut packet_router = PacketRouter::new();
     let packet_logger = PacketLogger::new();
-    let tun = Tun::new(packet_router.get_addr());
+    let tun = Tun::new(packet_router.get_addr())?;
     packet_router.add_packet_receiver(packet_logger.get_addr());
     packet_router.add_packet_receiver(tun.get_addr());
 
