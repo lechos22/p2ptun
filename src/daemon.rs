@@ -1,53 +1,42 @@
 //! The p2ptun's daemon. It is responsible for the most of the program's functionality.
 
-pub mod channel;
+pub mod actors;
+pub mod packet;
 
-use std::time::Duration;
+use tokio::{select, task::JoinSet};
 
-use tokio::{
-    sync::broadcast::{self, Sender},
-    task::JoinSet,
+use crate::daemon::actors::{
+    packet_logger::PacketLogger, packet_router::PacketRouter, tun::Tun, Actor,
 };
-
-use self::channel::{
-    log_channel::LogChannelManager, tun_channel::TunChannelManager, ChannelManager, Packet,
-};
-
-/// An async function that sleeps forever.
-async fn sleep_forever<T>() -> T {
-    tokio::time::sleep(Duration::MAX).await;
-    unreachable!()
-}
 
 /// The p2ptun's daemon configuration
 #[derive(Default)]
 pub struct DaemonConfig {}
 
-/// The p2ptun's daemon
-pub struct Daemon {
-    packet_sender: Sender<Packet>,
-    channel_jobs: JoinSet<!>,
+#[derive(Debug)]
+pub enum DaemonError {
+    Died,
 }
 
-impl Daemon {
-    /// Creates the daemon.
-    pub fn new(_config: DaemonConfig) -> Self {
-        Self {
-            packet_sender: broadcast::channel(64).0,
-            channel_jobs: JoinSet::new(),
-        }
-    }
-    /// Spawns a job for handling some channel.
-    fn spawn_channel_job(&mut self, channel_manager: impl ChannelManager + Send + Sync + 'static) {
-        let job = channel_manager.run(self.packet_sender.clone());
-        self.channel_jobs.spawn(job);
-    }
-    /// Runs the daemon.
-    pub async fn run(mut self) {
-        self.spawn_channel_job(LogChannelManager);
-        self.spawn_channel_job(TunChannelManager);
+/// The p2ptun's daemon
+pub async fn run_daemon(_config: DaemonConfig) -> Result<(), DaemonError> {
+    // Initialize actors
+    let mut packet_router = PacketRouter::new();
+    let packet_logger = PacketLogger::new();
+    let tun = Tun::new(packet_router.get_addr());
+    packet_router.add_packet_receiver(packet_logger.get_addr());
+    packet_router.add_packet_receiver(tun.get_addr());
 
-        // Await for Ctrl+C
-        let _ = tokio::signal::ctrl_c().await;
+    // Run
+    let mut join_set = JoinSet::new();
+    join_set.spawn(packet_logger.run());
+    join_set.spawn(packet_router.run());
+    join_set.spawn(tun.run());
+    select! {
+        _ = join_set.join_next() => {Err(DaemonError::Died)}
+        _ = tokio::signal::ctrl_c() => {
+            println!("\nStopping...");
+            Ok(())
+        }
     }
 }
