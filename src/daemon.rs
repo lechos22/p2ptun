@@ -1,78 +1,50 @@
 //! The p2ptun's daemon. It is responsible for the most of the program's functionality.
 
-pub mod channel;
-pub mod channel_group;
+pub mod actors;
+pub mod packet;
 
-use std::time::Duration;
+use tokio::{select, task::JoinSet};
 
-use iroh_net::key::SecretKey;
-use tokio::{
-    sync::broadcast::{self, Sender},
-    task::JoinSet,
+use crate::daemon::actors::{
+    packet_logger::PacketLogger, packet_router::PacketRouter, tun::Tun, Actor,
 };
-
-use self::{
-    channel::{
-        log_channel::LogChannelManager, noise_channel::NoiseChannelManager, ChannelManager, Packet,
-    },
-    channel_group::{iroh_channel_group::IrohChannelGroup, ChannelGroup},
-};
-
-/// An async function that sleeps forever.
-async fn sleep_forever<T>() -> T {
-    tokio::time::sleep(Duration::MAX).await;
-    unreachable!()
-}
 
 /// The p2ptun's daemon configuration
 #[derive(Default)]
-pub struct DaemonConfig {
-    secret_key: Option<SecretKey>,
+pub struct DaemonConfig {}
+
+/// Enum representing errors that can happen in p2ptun's daemon
+#[derive(Debug)]
+pub enum DaemonError {
+    TunError(tun::Error),
+    Died,
+}
+
+impl From<tun::Error> for DaemonError {
+    fn from(error: tun::Error) -> Self {
+        Self::TunError(error)
+    }
 }
 
 /// The p2ptun's daemon
-pub struct Daemon {
-    packet_sender: Sender<Packet>,
-    channel_jobs: JoinSet<!>,
-    secret_key: SecretKey,
-}
+pub async fn run_daemon(_config: DaemonConfig) -> Result<(), DaemonError> {
+    // Initialize actors
+    let mut packet_router = PacketRouter::new();
+    let packet_logger = PacketLogger::new();
+    let tun = Tun::new(packet_router.get_addr())?;
+    packet_router.add_packet_receiver(packet_logger.get_addr());
+    packet_router.add_packet_receiver(tun.get_addr());
 
-impl Daemon {
-    /// Creates the daemon.
-    pub fn new(config: DaemonConfig) -> Self {
-        Self {
-            packet_sender: broadcast::channel(64).0,
-            channel_jobs: JoinSet::new(),
-            secret_key: config.secret_key.unwrap_or_else(SecretKey::generate),
+    // Run
+    let mut join_set = JoinSet::new();
+    join_set.spawn(packet_logger.run());
+    join_set.spawn(packet_router.run());
+    join_set.spawn(tun.run());
+    select! {
+        _ = join_set.join_next() => {Err(DaemonError::Died)}
+        _ = tokio::signal::ctrl_c() => {
+            println!("\nStopping...");
+            Ok(())
         }
-    }
-    /// Spawns a job for handling some channel.
-    fn spawn_channel_job(&mut self, channel_manager: impl ChannelManager + Send + Sync + 'static) {
-        let job = channel_manager.run(self.packet_sender.clone());
-        self.channel_jobs.spawn(job);
-    }
-    /// Spawns a job for handling some channel group.
-    fn spawn_channel_group_job(
-        &mut self,
-        channel_group: impl ChannelGroup + Send + Sync + 'static,
-    ) {
-        let job = channel_group.run(self.packet_sender.clone());
-        self.channel_jobs.spawn(job);
-    }
-    /// Runs the daemon.
-    pub async fn run(mut self) {
-        self.spawn_channel_job(LogChannelManager);
-        if let Ok(noise) = std::env::var("NOISE") {
-            if !noise.is_empty() {
-                self.spawn_channel_job(NoiseChannelManager);
-            }
-        }
-        println!("Node ID: {}", self.secret_key.public());
-        let iroh_channel_group = IrohChannelGroup::new(self.secret_key.clone()).await;
-        let _iroh_channel_group_command_sender = iroh_channel_group.get_command_sender();
-        self.spawn_channel_group_job(iroh_channel_group);
-
-        // Await for Ctrl+C
-        let _ = tokio::signal::ctrl_c().await;
     }
 }
