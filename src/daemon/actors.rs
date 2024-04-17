@@ -1,7 +1,7 @@
 //! This module defines abstractions for actors and message passing.
 //!
-//! Actors can receive messages through addresses (`Addr`) and handle them asynchronously.
-//! Each actor implements the `Actor` trait, allowing it to send and receive messages.
+//! Actors can receive messages through addresses ([Addr]) and handle them asynchronously.
+//! Each actor implements the [Actor] trait, allowing it to send and receive messages.
 
 pub mod packet_logger;
 pub mod packet_router;
@@ -19,7 +19,7 @@ pub struct Addr<Message> {
 }
 
 impl<Message> Addr<Message> {
-    /// Creates an address from a [mpsc::Sender]
+    /// Creates an address from a [`mpsc::Sender`]
     pub fn new(sender: mpsc::Sender<Message>) -> Self {
         Self { sender }
     }
