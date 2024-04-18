@@ -43,10 +43,12 @@ impl PeerCollection {
         }
     }
     fn add_peer(&mut self, node_id: NodeId, peer: Peer) {
+        println!("Connected to peer {}", node_id);
         self.peers.insert(node_id, peer.get_addr());
         let message_address = self.message_address.clone();
         tokio::spawn(async move {
             peer.run().await;
+            println!("Disconnected from peer {}", node_id);
             message_address
                 .send_message(PeerCollectionMessage::RemovePeer(node_id))
                 .await;

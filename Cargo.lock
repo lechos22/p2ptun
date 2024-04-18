@@ -2054,6 +2054,7 @@ dependencies = [
 name = "p2ptun"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "iroh-net",
  "quinn",
  "tokio",

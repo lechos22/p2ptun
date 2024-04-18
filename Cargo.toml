@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.82"
 iroh-net = "0.14"
 quinn = "0.10.2"
 tun = { version = "0.6.1", features = ["async"] }
