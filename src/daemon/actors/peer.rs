@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use quinn::{Connection, RecvStream, SendStream};
+use quinn::{RecvStream, SendStream};
 use tokio::{select, sync::mpsc};
 
 use crate::daemon::packet::Packet;
@@ -11,17 +11,23 @@ pub struct Peer {
     packet_address: Addr<Packet>,
     packet_receiver: mpsc::Receiver<Packet>,
     peer_collection: Addr<Packet>,
-    connection: Connection,
+    send_stream: SendStream,
+    recv_stream: RecvStream,
 }
 
 impl Peer {
-    pub fn new(peer_collection: Addr<Packet>, connection: Connection) -> Self {
+    pub fn new(
+        peer_collection: Addr<Packet>,
+        send_stream: SendStream,
+        recv_stream: RecvStream,
+    ) -> Self {
         let (packet_sender, packet_receiver) = mpsc::channel(16);
         Self {
             packet_address: Addr::new(packet_sender),
             packet_receiver,
             peer_collection,
-            connection,
+            send_stream,
+            recv_stream,
         }
     }
     async fn send_packets(mut recv_stream: RecvStream, peer_collection: Addr<Packet>) {
@@ -47,15 +53,9 @@ impl Peer {
         }
     }
     pub async fn run(self) {
-        let Ok(send_stream) = self.connection.open_uni().await else {
-            return;
-        };
-        let Ok(recv_stream) = self.connection.accept_uni().await else {
-            return;
-        };
         select! {
-            _ = Self::send_packets(recv_stream, self.peer_collection) => {}
-            _ = Self::recv_packets(send_stream, self.packet_receiver) => {}
+            _ = Self::send_packets(self.recv_stream, self.peer_collection) => {}
+            _ = Self::recv_packets(self.send_stream, self.packet_receiver) => {}
         }
     }
 }

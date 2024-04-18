@@ -26,6 +26,11 @@ async fn future_option<T>(f: impl Fn() -> Option<T>) -> T {
 
 const ALPN: &[u8] = "p2ptun".as_bytes();
 
+enum ChannelMode {
+    Accept,
+    Open,
+}
+
 /// An actor that initiates and accepts connections to peers.
 pub struct PeerSource {
     address: Addr<PeerSourceMessage>,
@@ -115,7 +120,9 @@ impl PeerSource {
                 connection,
                 peers_packet_addr.clone(),
                 peers_message_addr.clone(),
-            ).await;
+                ChannelMode::Accept,
+            )
+            .await;
         }
     }
     async fn dial_peer(
@@ -131,6 +138,7 @@ impl PeerSource {
                     connection,
                     peers_packet_addr,
                     peers_message_addr,
+                    ChannelMode::Open,
                 ));
             }
             Err(error) => {
@@ -146,8 +154,20 @@ impl PeerSource {
         connection: Connection,
         peers_packet_addr: Addr<Packet>,
         peers_message_addr: Addr<PeerCollectionMessage>,
+        channel_mode: ChannelMode,
     ) {
-        let peer = Peer::new(peers_packet_addr, connection);
+        let streams = match channel_mode {
+            ChannelMode::Accept => connection.accept_bi().await,
+            ChannelMode::Open => connection.open_bi().await,
+        };
+        let (send_stream, recv_stream) = match streams {
+            Ok(streams) => streams,
+            Err(error) => {
+                eprintln!("Error establishing streams with {}, Reason: {:?}", node_id, error);
+                return;
+            }
+        };
+        let peer = Peer::new(peers_packet_addr, send_stream, recv_stream);
         peers_message_addr
             .send_message(PeerCollectionMessage::AddPeer(node_id, peer))
             .await;
