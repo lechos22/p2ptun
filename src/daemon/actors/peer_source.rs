@@ -1,6 +1,6 @@
 use iroh_net::{
-    key::SecretKey, relay::RelayMode, ticket::NodeTicket, tls::certificate::P2pCertificate,
-    MagicEndpoint, NodeAddr,
+    key::SecretKey, magic_endpoint::accept_conn, relay::RelayMode, ticket::NodeTicket,
+    MagicEndpoint, NodeAddr, NodeId,
 };
 use quinn::Connection;
 use tokio::sync::mpsc;
@@ -96,14 +96,26 @@ impl PeerSource {
         magic_endpoint: &MagicEndpoint,
     ) {
         while let Some(connecting) = magic_endpoint.accept().await {
+            tokio::spawn(Self::handle_connecting(
+                connecting,
+                peers_packet_addr.clone(),
+                peers_message_addr.clone(),
+            ));
+        }
+    }
+    async fn handle_connecting(
+        connecting: quinn::Connecting,
+        peers_packet_addr: Addr<Packet>,
+        peers_message_addr: Addr<PeerCollectionMessage>,
+    ) {
+        if let Ok((node_id, _, connection)) = accept_conn(connecting).await {
             // TODO: Check if the connection should be blocked
-            if let Ok(connection) = connecting.await {
-                tokio::spawn(Self::handle_connection(
-                    connection,
-                    peers_packet_addr.clone(),
-                    peers_message_addr.clone(),
-                ));
-            }
+            Self::handle_connection(
+                node_id,
+                connection,
+                peers_packet_addr.clone(),
+                peers_message_addr.clone(),
+            ).await;
         }
     }
     async fn dial_peer(
@@ -115,6 +127,7 @@ impl PeerSource {
         match magic_endpoint.connect(node_addr.clone(), ALPN).await {
             Ok(connection) => {
                 tokio::spawn(Self::handle_connection(
+                    node_addr.node_id,
                     connection,
                     peers_packet_addr,
                     peers_message_addr,
@@ -129,22 +142,11 @@ impl PeerSource {
         }
     }
     async fn handle_connection(
+        node_id: NodeId,
         connection: Connection,
         peers_packet_addr: Addr<Packet>,
         peers_message_addr: Addr<PeerCollectionMessage>,
     ) {
-        let Some(peer_identity) = connection.peer_identity() else {
-            eprintln!("Couldn't retreive peer's certificate.");
-            return;
-        };
-        let cert = match peer_identity.downcast::<P2pCertificate>() {
-            Ok(cert) => cert,
-            Err(error) => {
-                eprintln!("Couldn't downcast peer's certificate. Reason: {:?}", error);
-                return;
-            }
-        };
-        let node_id = cert.peer_id();
         let peer = Peer::new(peers_packet_addr, connection);
         peers_message_addr
             .send_message(PeerCollectionMessage::AddPeer(node_id, peer))
