@@ -51,13 +51,14 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
     println!("Node ticket: {}", peer_source.node_ticket().await?);
     let tun = if config.enable_tun {
         let tun = Tun::new(packet_router.get_addr())?;
-        packet_router.add_packet_receiver(tun.get_addr());
+        packet_router.add_incoming_packet_receiver(tun.get_addr());
         Some(tun)
     } else {
         None
     };
-    packet_router.add_packet_receiver(packet_logger.get_addr());
-    packet_router.add_packet_receiver(peer_collection.get_addr());
+    packet_router.add_incoming_packet_receiver(packet_logger.get_addr());
+    packet_router.add_outgoing_packet_receiver(packet_logger.get_addr());
+    packet_router.add_outgoing_packet_receiver(peer_collection.get_addr());
 
     // Run
     let mut join_set = JoinSet::new();
