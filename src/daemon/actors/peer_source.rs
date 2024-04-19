@@ -1,3 +1,7 @@
+//! Module for [PeerSource] actor.
+//! 
+//! It is responsible for acquiring connections with other peers.
+
 use iroh_net::{
     key::SecretKey, magic_endpoint::accept_conn, relay::RelayMode, ticket::NodeTicket,
     MagicEndpoint, NodeAddr, NodeId,
@@ -9,8 +13,10 @@ use crate::daemon::{packet::Packet, DaemonError};
 
 use super::{peer::Peer, peer_collection::PeerCollectionMessage, Actor, Addr};
 
+/// Messages that can be sent to [PeerSource].
 #[derive(Debug, Clone)]
 pub enum PeerSourceMessage {
+    /// Instructs [PeerSource] to initiate a connection with the specified [NodeAddr].
     DialPeer(NodeAddr),
 }
 
@@ -26,12 +32,13 @@ async fn future_option<T>(f: impl Fn() -> Option<T>) -> T {
 
 const ALPN: &[u8] = "p2ptun".as_bytes();
 
+/// Represents the mode of establishing streams on [Connection].
 enum ChannelMode {
     Accept,
     Open,
 }
 
-/// An actor that initiates and accepts connections to peers.
+/// An actor that initiates and accepts connections to peers using [MagicEndpoint].
 pub struct PeerSource {
     address: Addr<PeerSourceMessage>,
     receiver: mpsc::Receiver<PeerSourceMessage>,
@@ -40,6 +47,7 @@ pub struct PeerSource {
     magic_endpoint: MagicEndpoint,
 }
 impl PeerSource {
+    /// Creates a new [PeerSource] actor.
     pub async fn new<PeerCollectionActor>(
         peer_collection: &PeerCollectionActor,
         secret_key: SecretKey,
@@ -68,10 +76,12 @@ impl PeerSource {
             magic_endpoint,
         })
     }
+    /// Retrieves the [NodeTicket] for this [PeerSource].
     pub async fn node_ticket(&self) -> Result<NodeTicket, DaemonError> {
         let node_addr = self.magic_endpoint.my_addr().await?;
         Ok(NodeTicket::new(node_addr)?)
     }
+    /// Handles incoming messages to [PeerSource].
     async fn handle_messages(
         peers_packet_addr: &Addr<Packet>,
         peers_message_addr: &Addr<PeerCollectionMessage>,
@@ -95,6 +105,7 @@ impl PeerSource {
             }
         }
     }
+    /// Handles incoming connections from [MagicEndpoint].
     async fn handle_connections(
         peers_packet_addr: &Addr<Packet>,
         peers_message_addr: &Addr<PeerCollectionMessage>,
@@ -108,6 +119,7 @@ impl PeerSource {
             ));
         }
     }
+    /// Handles one incoming connection.
     async fn handle_connecting(
         connecting: quinn::Connecting,
         peers_packet_addr: Addr<Packet>,
@@ -125,6 +137,7 @@ impl PeerSource {
             .await;
         }
     }
+    /// Creates a connection to the peer with the specified [NodeAddr].
     async fn dial_peer(
         peers_packet_addr: Addr<Packet>,
         peers_message_addr: Addr<PeerCollectionMessage>,
@@ -149,6 +162,7 @@ impl PeerSource {
             }
         }
     }
+    /// Handles an established connection to a peer by opening streams on the connection and registers the peer.
     async fn handle_connection(
         node_id: NodeId,
         connection: Connection,
@@ -163,7 +177,10 @@ impl PeerSource {
         let (send_stream, recv_stream) = match streams {
             Ok(streams) => streams,
             Err(error) => {
-                eprintln!("Error establishing streams with {}, Reason: {:?}", node_id, error);
+                eprintln!(
+                    "Error establishing streams with {}, Reason: {:?}",
+                    node_id, error
+                );
                 return;
             }
         };
@@ -172,6 +189,7 @@ impl PeerSource {
             .send_message(PeerCollectionMessage::AddPeer(node_id, peer))
             .await;
     }
+    /// Runs the actor.
     pub async fn run(mut self) {
         tokio::select! {
             _ = Self::handle_messages(&self.peers_packet_addr, &self.peers_message_addr, &mut self.receiver, &self.magic_endpoint) => {}
