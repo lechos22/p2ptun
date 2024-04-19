@@ -1,5 +1,5 @@
 //! Module for [Peer] actor.
-//! 
+//!
 //! It is responsible for transmitting data to and from a peer.
 
 use std::sync::Arc;

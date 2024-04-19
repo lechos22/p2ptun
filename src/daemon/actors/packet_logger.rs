@@ -1,4 +1,6 @@
-//! Module for packet logging actor.
+//! Module for [PacketLogger] actor.
+//!
+//! It is responsible for keeping a log of packets going through the program.
 
 use tokio::sync::mpsc;
 

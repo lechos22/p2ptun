@@ -13,7 +13,7 @@ use std::{fmt::Debug, sync::Arc};
 pub enum Packet {
     /// Outgoing packet containing data to be transmitted.
     Outgoing(Arc<[u8]>),
-    
+
     /// Incoming packet containing received data.
     Incoming(Arc<[u8]>),
 }

@@ -1,5 +1,5 @@
 //! Module for [PeerCollection] actor.
-//! 
+//!
 //! It is responsible for managing connected peers.
 
 use std::collections::HashMap;

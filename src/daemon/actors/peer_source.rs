@@ -1,5 +1,5 @@
 //! Module for [PeerSource] actor.
-//! 
+//!
 //! It is responsible for acquiring connections with other peers.
 
 use iroh_net::{

@@ -1,4 +1,6 @@
-//! Module for packet routing actor.
+//! Module for [PacketRouter] actor.
+//!
+//! It is responsible for sending packet to right actors.
 
 use tokio::sync::mpsc;
 
@@ -76,7 +78,7 @@ impl PacketRouter {
                     for addr in &self.incoming_packet_receivers {
                         addr.send_message(packet.clone()).await;
                     }
-                },
+                }
             }
         }
     }

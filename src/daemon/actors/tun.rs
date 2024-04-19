@@ -1,4 +1,6 @@
-//! Module for TUN (network tunnel) actor.
+//! Module for [Tun] actor.
+//!
+//! It is responsible for managing the TUN device.
 
 use std::sync::Arc;
 
@@ -62,7 +64,10 @@ impl Tun {
     }
 
     /// Asynchronously receives packets from the packet receiver and writes them to the TUN device.
-    async fn recv_packets(mut tun_write: WriteHalf<AsyncDevice>, mut receiver: mpsc::Receiver<Packet>) {
+    async fn recv_packets(
+        mut tun_write: WriteHalf<AsyncDevice>,
+        mut receiver: mpsc::Receiver<Packet>,
+    ) {
         loop {
             if let Some(Packet::Incoming(packet)) = receiver.recv().await {
                 // Write the incoming packet to the TUN device
