@@ -5,6 +5,9 @@
 
 pub mod packet_logger;
 pub mod packet_router;
+pub mod peer;
+pub mod peer_collection;
+pub mod peer_source;
 pub mod tun;
 
 use std::fmt::Debug;
@@ -12,10 +15,18 @@ use std::fmt::Debug;
 use tokio::sync::mpsc;
 
 /// Represents the address of an actor to which messages can be sent.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Addr<Message> {
     /// The message sender of this actor
     sender: mpsc::Sender<Message>,
+}
+
+impl<Message> Clone for Addr<Message> {
+    fn clone(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
 }
 
 impl<Message> Addr<Message> {

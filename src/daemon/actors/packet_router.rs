@@ -14,8 +14,11 @@ pub struct PacketRouter {
     /// The address used to send packets to this router.
     address: Addr<Packet>,
 
-    /// Collection of addresses of packet receivers connected to this router.
-    packet_receivers: Vec<Addr<Packet>>,
+    /// Collection of addresses of incoming packet receivers connected to this router.
+    incoming_packet_receivers: Vec<Addr<Packet>>,
+
+    /// Collection of addresses of outgoing packet receivers connected to this router.
+    outgoing_packet_receivers: Vec<Addr<Packet>>,
 }
 
 impl PacketRouter {
@@ -28,16 +31,25 @@ impl PacketRouter {
         Self {
             packet_receiver,
             address: Addr::new(packet_sender),
-            packet_receivers: Vec::new(),
+            incoming_packet_receivers: Vec::new(),
+            outgoing_packet_receivers: Vec::new(),
         }
     }
 
-    /// Adds a new packet receiver to this router.
+    /// Adds a new incoming packet receiver to this router.
     ///
     /// Parameters:
     /// - `addr`: The address of the packet receiver to add.
-    pub fn add_packet_receiver(&mut self, addr: Addr<Packet>) {
-        self.packet_receivers.push(addr);
+    pub fn add_incoming_packet_receiver(&mut self, addr: Addr<Packet>) {
+        self.incoming_packet_receivers.push(addr);
+    }
+
+    /// Adds a new outgoing packet receiver to this router.
+    ///
+    /// Parameters:
+    /// - `addr`: The address of the packet receiver to add.
+    pub fn add_outgoing_packet_receiver(&mut self, addr: Addr<Packet>) {
+        self.outgoing_packet_receivers.push(addr);
     }
 
     /// Runs the packet router asynchronously.
@@ -52,9 +64,19 @@ impl PacketRouter {
                 None => continue, // If receive fails, continue to the next iteration.
             };
 
-            // Send the received packet to each connected packet receiver.
-            for addr in &self.packet_receivers {
-                addr.send_message(packet.clone()).await;
+            match packet {
+                packet @ Packet::Outgoing(_) => {
+                    // Send the received packet to each connected outgoing packet receiver.
+                    for addr in &self.outgoing_packet_receivers {
+                        addr.send_message(packet.clone()).await;
+                    }
+                }
+                packet @ Packet::Incoming(_) => {
+                    // Send the received packet to each connected incoming packet receiver.
+                    for addr in &self.incoming_packet_receivers {
+                        addr.send_message(packet.clone()).await;
+                    }
+                },
             }
         }
     }
