@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use iroh_net::NodeId;
-use tokio::{select, sync::mpsc};
+use tokio::{select, sync::mpsc, task::AbortHandle};
 
 use crate::daemon::packet::Packet;
 
@@ -16,7 +16,11 @@ pub enum PeerCollectionMessage {
     /// Instructs [PeerCollection] to add a peer with the specified [NodeId] and [Peer] instance.
     AddPeer(NodeId, Peer),
     /// Instructs [PeerCollection] to remove a peer identified by the given [NodeId].
-    RemovePeer(NodeId),
+    DisconnectPeer(NodeId),
+}
+struct PeerWrapper {
+    abort_handle: AbortHandle,
+    address: Addr<Packet>,
 }
 /// Manages a collection of peers and handles peer-related messages and packet routing.
 pub struct PeerCollection {
@@ -25,7 +29,7 @@ pub struct PeerCollection {
     router_address: Addr<Packet>,
     packet_address: Addr<Packet>,
     packet_receiver: mpsc::Receiver<Packet>,
-    peers: HashMap<NodeId, Addr<Packet>>,
+    peers: HashMap<NodeId, PeerWrapper>,
 }
 impl PeerCollection {
     /// Creates a new instance with the specified `router_address`.
@@ -47,27 +51,36 @@ impl PeerCollection {
             PeerCollectionMessage::AddPeer(node_id, peer) => {
                 self.add_peer(node_id, peer);
             }
-            PeerCollectionMessage::RemovePeer(node_id) => {
-                self.remove_peer(node_id);
+            PeerCollectionMessage::DisconnectPeer(node_id) => {
+                self.disconnect_peer(node_id);
             }
         }
     }
     /// Adds a peer to the collection identified by the provided [NodeId].
     fn add_peer(&mut self, node_id: NodeId, peer: Peer) {
         println!("Connected to peer {}", node_id);
-        self.peers.insert(node_id, peer.get_addr());
+        let peer_addr = peer.get_addr();
         let message_address = self.message_address.clone();
-        tokio::spawn(async move {
+        let join_handle = tokio::spawn(async move {
             peer.run().await;
-            println!("Disconnected from peer {}", node_id);
             message_address
-                .send_message(PeerCollectionMessage::RemovePeer(node_id))
+                .send_message(PeerCollectionMessage::DisconnectPeer(node_id))
                 .await;
         });
+        self.peers.insert(
+            node_id,
+            PeerWrapper {
+                abort_handle: join_handle.abort_handle(),
+                address: peer_addr,
+            },
+        );
     }
-    /// Removes a peer from the collection identified by the provided [NodeId].
-    fn remove_peer(&mut self, node_id: NodeId) {
-        self.peers.remove(&node_id);
+    /// Disconnects from a peer identified by the provided [NodeId].
+    fn disconnect_peer(&mut self, node_id: NodeId) {
+        if let Some(peer) = self.peers.remove(&node_id) {
+            println!("Disconnected from peer {}", node_id);
+            peer.abort_handle.abort();
+        }
     }
     /// Handles a received packet.
     async fn handle_packet(&self, packet: Packet) {
@@ -83,7 +96,7 @@ impl PeerCollection {
     /// Sends a packet to all connected peers in the collection.
     async fn send_packet_to_peers(&self, packet: &Packet) {
         for peer in self.peers.values() {
-            peer.send_message(packet.clone()).await;
+            peer.address.send_message(packet.clone()).await;
         }
     }
     /// Executes a single cycle of message handling or packet processing.
