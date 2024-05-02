@@ -5,7 +5,7 @@ use iroh_net::{
 use quinn::Connection;
 use tokio::sync::mpsc;
 
-use crate::daemon::{packet::Packet, DaemonError};
+use crate::daemon::{packet::Packet, error::DaemonError};
 
 use super::{peer::Peer, peer_collection::PeerCollectionMessage, Actor, Addr};
 

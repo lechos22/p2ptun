@@ -9,6 +9,7 @@ pub mod peer;
 pub mod peer_collection;
 pub mod peer_source;
 pub mod tun;
+pub mod daemon_controller;
 
 use std::fmt::Debug;
 

@@ -1,40 +1,21 @@
 //! The p2ptun's daemon. It is responsible for the most of the program's functionality.
 
 pub mod actors;
+pub mod error;
 pub mod packet;
 
 use iroh_net::key::SecretKey;
 use tokio::{select, task::JoinSet};
 
-use crate::daemon::actors::{
+use crate::daemon::{actors::{
     packet_logger::PacketLogger, packet_router::PacketRouter, peer_collection::PeerCollection,
     peer_source::PeerSource, tun::Tun, Actor,
-};
+}, error::DaemonError};
 
 /// The p2ptun's daemon configuration
 #[derive(Default)]
 pub struct DaemonConfig {
     pub enable_tun: bool,
-}
-
-/// Enum representing errors that can happen in p2ptun's daemon
-#[derive(Debug)]
-pub enum DaemonError {
-    TunError(tun::Error),
-    AnyhowError(anyhow::Error),
-    Died,
-}
-
-impl From<tun::Error> for DaemonError {
-    fn from(error: tun::Error) -> Self {
-        Self::TunError(error)
-    }
-}
-
-impl From<anyhow::Error> for DaemonError {
-    fn from(error: anyhow::Error) -> Self {
-        Self::AnyhowError(error)
-    }
 }
 
 /// The p2ptun's daemon
