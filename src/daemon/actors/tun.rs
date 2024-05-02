@@ -13,6 +13,11 @@ use crate::daemon::packet::Packet;
 
 use super::{Actor, Addr};
 
+pub struct TunConfig {
+    pub ip: String,
+    pub netmask: String,
+}
+
 /// Represents a TUN (network tunnel) actor for handling network traffic.
 pub struct Tun {
     /// The address used to send packets to the TUN actor.
@@ -32,16 +37,17 @@ impl Tun {
     /// Creates a new [Tun] instance.
     ///
     /// Parameters:
+    /// - `tun_config`: Configuration for this actor
     /// - `packet_router`: The address of the packet router to forward packets to.
     ///
     /// Returns a [Tun] instance with its associated receiver channel and TUN device.
-    pub fn new(packet_router: Addr<Packet>) -> tun::Result<Self> {
+    pub fn new(config: TunConfig, packet_router: Addr<Packet>) -> tun::Result<Self> {
         let (sender, receiver) = mpsc::channel(16);
         Ok(Self {
             address: Addr::new(sender),
             receiver,
             packet_router,
-            tun: tun::create_as_async(configure().up())?, // Create the TUN device
+            tun: tun::create_as_async(configure().address(config.ip).netmask(config.netmask).up())?, // Create the TUN device
         })
     }
 
@@ -62,7 +68,10 @@ impl Tun {
     }
 
     /// Asynchronously receives packets from the packet receiver and writes them to the TUN device.
-    async fn recv_packets(mut tun_write: WriteHalf<AsyncDevice>, mut receiver: mpsc::Receiver<Packet>) {
+    async fn recv_packets(
+        mut tun_write: WriteHalf<AsyncDevice>,
+        mut receiver: mpsc::Receiver<Packet>,
+    ) {
         loop {
             if let Some(Packet::Incoming(packet)) = receiver.recv().await {
                 // Write the incoming packet to the TUN device

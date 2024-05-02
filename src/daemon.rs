@@ -11,10 +11,12 @@ use crate::daemon::{actors::{
     daemon_controller::DaemonController, packet_logger::PacketLogger, packet_router::PacketRouter, peer_collection::PeerCollection, peer_source::PeerSource, tun::Tun, Actor
 }, error::DaemonError};
 
+use self::actors::tun::TunConfig;
+
 /// The p2ptun's daemon configuration
 #[derive(Default)]
 pub struct DaemonConfig {
-    pub enable_tun: bool,
+    pub tun: Option<TunConfig>,
 }
 
 /// The p2ptun's daemon
@@ -29,8 +31,8 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
     let peer_collection = PeerCollection::new(packet_router.get_addr());
     let peer_source = PeerSource::new(&peer_collection, secret_key).await?;
     println!("Node ticket: {}", peer_source.node_ticket().await?);
-    let tun = if config.enable_tun {
-        let tun = Tun::new(packet_router.get_addr())?;
+    let tun = if let Some(tun_config) = config.tun {
+        let tun = Tun::new(tun_config, packet_router.get_addr())?;
         packet_router.add_incoming_packet_receiver(tun.get_addr());
         Some(tun)
     } else {
