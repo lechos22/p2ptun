@@ -11,7 +11,7 @@ async fn main() {
     let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
     match &args_ref[..] {
         &["daemon"] => {
-            run_daemon(DaemonConfig::default()).await.unwrap();
+            run_daemon(DaemonConfig { enable_tun: true }).await.unwrap();
         }
         &["ctl", "dial-peer", node_ticket] => {
             dial_peer(node_ticket).unwrap();
