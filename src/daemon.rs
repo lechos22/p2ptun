@@ -8,8 +8,7 @@ use iroh_net::key::SecretKey;
 use tokio::{select, task::JoinSet};
 
 use crate::daemon::{actors::{
-    packet_logger::PacketLogger, packet_router::PacketRouter, peer_collection::PeerCollection,
-    peer_source::PeerSource, tun::Tun, Actor,
+    daemon_controller::DaemonController, packet_logger::PacketLogger, packet_router::PacketRouter, peer_collection::PeerCollection, peer_source::PeerSource, tun::Tun, Actor
 }, error::DaemonError};
 
 /// The p2ptun's daemon configuration
@@ -40,6 +39,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
     packet_router.add_incoming_packet_receiver(packet_logger.get_addr());
     packet_router.add_outgoing_packet_receiver(packet_logger.get_addr());
     packet_router.add_outgoing_packet_receiver(peer_collection.get_addr());
+    let controller = DaemonController::new(peer_source.get_addr(), peer_collection.get_addr())?;
 
     // Run
     let mut join_set = JoinSet::new();
@@ -47,6 +47,7 @@ pub async fn run_daemon(config: DaemonConfig) -> Result<(), DaemonError> {
     join_set.spawn(packet_router.run());
     join_set.spawn(peer_collection.run());
     join_set.spawn(peer_source.run());
+    join_set.spawn(controller.run());
     if let Some(tun) = tun {
         join_set.spawn(tun.run());
     }

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use interprocess::local_socket::{GenericFilePath, Name, ToFsName};
+use interprocess::local_socket::{GenericNamespaced, Name, ToNsName};
 
 pub enum DaemonProcedure {
     DialPeer(String),
@@ -27,17 +27,14 @@ impl FromStr for DaemonProcedure {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.split_whitespace().collect::<Vec<&str>>().as_slice() {
             &["dial_peer", peer_ticket] => Ok(DaemonProcedure::DialPeer(peer_ticket.to_string())),
-            &["disconnect_peer", peer_id] => Ok(DaemonProcedure::DisconnectPeer(peer_id.to_string())),
+            &["disconnect_peer", peer_id] => {
+                Ok(DaemonProcedure::DisconnectPeer(peer_id.to_string()))
+            }
             _ => Err(ParseError::BadDaemonProcedure),
         }
     }
 }
 
-#[cfg(unix)]
 pub fn local_socket_name() -> std::io::Result<Name<'static>> {
-    "/var/p2ptun.sock".to_fs_name::<GenericFilePath>()
-}
-#[cfg(windows)]
-pub fn local_socket_name() -> std::io::Result<Name<'static>> {
-    r"\\.\pipe\p2ptun".to_fs_name::<GenericFilePath>()
+    "/var/run/p2ptun.sock".to_ns_name::<GenericNamespaced>()
 }

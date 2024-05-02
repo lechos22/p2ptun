@@ -7,7 +7,7 @@ use interprocess::local_socket::{
 use iroh_net::{ticket::NodeTicket, NodeId};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::{common::DaemonProcedure, daemon::error::DaemonError};
+use crate::{common::{local_socket_name, DaemonProcedure}, daemon::error::DaemonError};
 
 use super::{peer_collection::PeerCollectionMessage, peer_source::PeerSourceMessage, Addr};
 
@@ -22,7 +22,7 @@ impl DaemonController {
         peer_source: Addr<PeerSourceMessage>,
         peer_collection: Addr<PeerCollectionMessage>,
     ) -> Result<Self, DaemonError> {
-        let socket = ListenerOptions::new().create_tokio()?;
+        let socket = ListenerOptions::new().name(local_socket_name()?).create_tokio()?;
         Ok(Self {
             socket,
             peer_source,
